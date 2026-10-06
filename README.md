@@ -40,7 +40,7 @@ $EDITOR config.json
 # 4. 发一条测试通知，确认凭据与网络都没问题
 ./sshtarpitwatch --test-notify
 
-# 5. 开机自启 / 崩溃重启：见下文“systemd 服务”
+# 5. 开机自启 / 崩溃重启：见下文“systemd 服务”或“Docker”
 ```
 
 > `--test-notify` 退出码：`0` = 发送成功；`1` = 配置错误（含渠道未启用、凭据缺失）；`2` = 发送失败。
@@ -199,6 +199,45 @@ journalctl -u sshtarpitwatch -f
 - **改配置后**：`sudo systemctl kill -s HUP sshtarpitwatch` 热重载（新配置非法时保留旧配置继续运行）。
 - **端口 < 1024**（如 22；默认 2222 无需）：取消模板里 `AmbientCapabilities=CAP_NET_BIND_SERVICE` 一行的注释，或改用 ≥1024 的端口。
 - **卸载**：`sudo systemctl disable --now sshtarpitwatch`，删掉 `/etc/systemd/system/sshtarpitwatch.service`，再删掉解压出来的目录（含 `config.json`）。程序不会在系统其他位置留下文件。
+
+## Docker（可选）
+
+镜像与 Release 出自同一个二进制（CI 发版时构建并推送），拉取体积约 8.6 MB——基础镜像是 .NET 官方的 chiseled 变体：没有 shell、没有包管理器、默认非 root。
+
+```bash
+# 1. 拉取镜像
+docker pull azhuge233/sshtarpitwatch:<版本>        # 例如 0.2.0；:latest 跟随最新版本
+
+# 2. 准备配置目录（权限照旧建议 600）
+mkdir -p ~/sshtarpitwatch
+cp config.example.json ~/sshtarpitwatch/config.json
+$EDITOR ~/sshtarpitwatch/config.json
+chmod 600 ~/sshtarpitwatch/config.json
+
+# 3. 运行（以你自己的 UID 运行，600 的配置才读得到；参数已按最小权限配好）
+docker run -d --name sshtarpitwatch \
+  --restart unless-stopped \
+  --read-only --tmpfs /tmp \
+  --cap-drop=ALL --security-opt no-new-privileges:true \
+  --pids-limit 256 --memory 128m \
+  --user "$(id -u):$(id -g)" \
+  -p 2222:2222 \
+  -v ~/sshtarpitwatch:/data:ro \
+  -v /etc/localtime:/etc/localtime:ro \
+  azhuge233/sshtarpitwatch:<版本>
+
+# 4. 看日志（Ctrl+C 退出）
+docker logs -f sshtarpitwatch
+```
+
+- **镜像标签**：每个版本一个（如 `:0.2.0`），另推 `:latest` 跟随最新版本。
+- **端口**：默认 `-p 2222:2222`；想让焦油坑顶在宿主的 22 端口（真实 SSH 另挪他处）写 `-p 22:2222` 即可——容器里始终监听 2222，不需要任何额外权限。
+- **配置**：容器读 `/data/config.json`，挂载的是**目录**而不是单个文件——编辑器保存会替换文件，单文件挂载下热重载会读到旧内容。改完配置执行 `docker kill -s HUP sshtarpitwatch` 热重载。
+- **权限**：`--user "$(id -u):$(id -g)"` 让容器进程以你的身份运行，`chmod 600` 的配置依然可读；容器也不会改动宿主上的任何文件。
+- **时区**：镜像不含时区数据（体积小的一部分原因），挂上 `-v /etc/localtime:/etc/localtime:ro` 通知时间就与宿主机一致；不挂则显示 UTC。
+- **日志**：全部走 stdout（`docker logs`）；想限制占用可加 `--log-opt max-size=10m`。
+- **卸载**：`docker rm -f sshtarpitwatch`，再删掉 `~/sshtarpitwatch` 目录即可。
+- **防火墙**：Docker 发布端口是直接写 iptables 的，会绕过 ufw 一类的规则——暴露面完全由 `-p` 参数决定。
 
 ## 运行要求与部署注意
 

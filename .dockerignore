@@ -1,0 +1,5 @@
+# 构建上下文只允许两件东西进入：Dockerfile 与编译好的二进制。
+# 其余全部排除——尤其防止 config.json（含 Bot Token）与内部文档被意外打包进镜像层。
+*
+!Dockerfile
+!sshtarpitwatch

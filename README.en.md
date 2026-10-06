@@ -40,7 +40,7 @@ $EDITOR config.json
 # 4. Send a test notification to check your credentials and network
 ./sshtarpitwatch --test-notify
 
-# 5. Start at boot / restart on failure: see "systemd service" below
+# 5. Start at boot / restart on failure: see "systemd service" or "Docker" below
 ```
 
 > `--test-notify` exit codes: `0` = sent successfully; `1` = configuration error (including a disabled channel or missing credentials); `2` = sending failed.
@@ -200,6 +200,45 @@ journalctl -u sshtarpitwatch -f
 - **After editing the config**: hot-reload with `sudo systemctl kill -s HUP sshtarpitwatch` (an invalid config is rejected and the old one keeps running).
 - **Ports below 1024** (e.g. 22; not needed for the default 2222): uncomment `AmbientCapabilities=CAP_NET_BIND_SERVICE`, or use a port ≥1024.
 - **Uninstall**: `sudo systemctl disable --now sshtarpitwatch`, remove `/etc/systemd/system/sshtarpitwatch.service`, then delete the unpacked directory (including `config.json`). The program leaves no files anywhere else on the system.
+
+## Docker (optional)
+
+The image is built from the same binary as the release (CI builds and pushes it on every release). Pull size is about 8.6 MB — the base image is the official .NET "chiseled" variant: no shell, no package manager, non-root by default.
+
+```bash
+# 1. Pull the image
+docker pull azhuge233/sshtarpitwatch:<version>     # e.g. 0.2.0; :latest follows the newest release
+
+# 2. Prepare a config directory (600 is still recommended)
+mkdir -p ~/sshtarpitwatch
+cp config.example.json ~/sshtarpitwatch/config.json
+$EDITOR ~/sshtarpitwatch/config.json
+chmod 600 ~/sshtarpitwatch/config.json
+
+# 3. Run (as your own UID so the 600 config stays readable; the flags are already minimal-privilege)
+docker run -d --name sshtarpitwatch \
+  --restart unless-stopped \
+  --read-only --tmpfs /tmp \
+  --cap-drop=ALL --security-opt no-new-privileges:true \
+  --pids-limit 256 --memory 128m \
+  --user "$(id -u):$(id -g)" \
+  -p 2222:2222 \
+  -v ~/sshtarpitwatch:/data:ro \
+  -v /etc/localtime:/etc/localtime:ro \
+  azhuge233/sshtarpitwatch:<version>
+
+# 4. Follow the logs (Ctrl+C to exit)
+docker logs -f sshtarpitwatch
+```
+
+- **Image tags**: one per version (e.g. `:0.2.0`), plus `:latest` following the newest release.
+- **Port**: `-p 2222:2222` by default; to put the tarpit on the host's port 22 (moving your real SSH elsewhere) use `-p 22:2222` — the container always listens on 2222 and needs no extra privileges.
+- **Config**: the container reads `/data/config.json`, and the mount is a **directory**, not a single file — editors replace files when saving, and with a single-file mount a reload would read stale content. After editing the config, `docker kill -s HUP sshtarpitwatch` reloads it.
+- **Permissions**: `--user "$(id -u):$(id -g)"` runs the process as you, so a `chmod 600` config stays readable and the container never modifies host files.
+- **Time zone**: the image ships no timezone data (part of why it is so small); mount `-v /etc/localtime:/etc/localtime:ro` to match the host, otherwise times show UTC.
+- **Logs**: everything goes to stdout (`docker logs`); add `--log-opt max-size=10m` to cap the size.
+- **Uninstall**: `docker rm -f sshtarpitwatch`, then delete the `~/sshtarpitwatch` directory.
+- **Firewall**: Docker publishes ports by writing iptables rules directly, bypassing ufw-style rules — your exposure is exactly what `-p` says.
 
 ## Requirements and deployment notes
 

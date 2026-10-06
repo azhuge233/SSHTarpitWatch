@@ -101,6 +101,84 @@ jobs:
             dist/sshtarpitwatch-*-linux-x64.tar.gz
             dist/SHA256SUMS.txt
 
+  image:
+    needs: package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-package
+          path: dist
+
+      - name: 准备构建上下文（二进制 + Dockerfile）
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pkg /tmp/imgctx
+          tar -xzf dist/sshtarpitwatch-*-linux-x64.tar.gz -C /tmp/pkg --strip-components=1
+          cp /tmp/pkg/sshtarpitwatch /tmp/imgctx/
+          cp Dockerfile .dockerignore /tmp/imgctx/
+          ls -l /tmp/imgctx
+
+      - name: 构建镜像
+        run: docker build /tmp/imgctx -t sshtarpitwatch:ci
+
+      - name: 冒烟测试（加固参数 + 端口连通 + 优雅退出）
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cfg
+          printf '{"nickname":"ci-smoke","port":2222}\n' > /tmp/cfg/config.json
+          chmod 644 /tmp/cfg/config.json
+          docker run -d --name smoke \
+            --read-only --tmpfs /tmp \
+            --cap-drop=ALL --security-opt no-new-privileges:true \
+            --pids-limit 256 --memory 128m \
+            -p 127.0.0.1::2222 \
+            -v /tmp/cfg:/data:ro -v /etc/localtime:/etc/localtime:ro \
+            sshtarpitwatch:ci
+          sleep 2
+          docker logs smoke 2>&1 | grep -q 'LISTEN' || { docker logs smoke; echo "::error::容器未监听"; exit 1; }
+          port=$(docker port smoke 2222 | head -1 | awk -F: '{print $2}')
+          timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port" || { echo "::error::宿主端口不可连接"; docker logs smoke; exit 1; }
+          docker stop smoke >/dev/null
+          docker logs smoke 2>&1 | grep -q 'TOTALS' || { docker logs smoke; echo "::error::未打印 TOTALS（优雅退出异常）"; exit 1; }
+          docker rm -f smoke
+          echo "冒烟测试通过"
+
+      - name: 登录 Docker Hub
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKERHUB_USERNAME:-}" ] || [ -z "${DOCKERHUB_TOKEN:-}" ]; then
+            echo "::error::未配置 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 仓库 Secret"
+            exit 1
+          fi
+          # 令牌经 stdin 传入（绝不出现在命令行参数里——argv 会被进程列表捕获）；
+          # 本步骤不开 set -x；即便误开，GitHub 也会把 Secret 值打码为 ***
+          printf '%s\n' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: 打标签并推送
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          name=$(basename "$(ls dist/sshtarpitwatch-*-linux-x64.tar.gz)")
+          version=${name#sshtarpitwatch-}
+          version=${version%-linux-x64.tar.gz}
+          [ "$version" = "${GITHUB_REF_NAME#v}" ] || { echo "::error::产物版本与标签不一致"; exit 1; }
+          img="azhuge233/sshtarpitwatch"
+          docker tag sshtarpitwatch:ci "$img:$version"
+          docker tag sshtarpitwatch:ci "$img:latest"
+          docker push "$img:$version"
+          docker push "$img:latest"
+          echo "已推送 $img:$version 与 :latest"
+
   publish:
     needs: package
     if: startsWith(github.ref, 'refs/tags/v')
