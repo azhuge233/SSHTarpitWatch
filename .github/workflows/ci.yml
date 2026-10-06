@@ -1,10 +1,15 @@
 name: CI
 
-# 推送 main / 提交 PR 时跑项目门禁：构建（0 警告）→ 格式检查 → 单元测试
+# 推送 main / 提交 PR 时跑项目门禁：构建（0 警告）→ 格式检查 → 单元测试；纯文档改动（*.md）不触发
 on:
   push:
     branches: [main]
+    paths-ignore:
+      # 纯文档改动不跑门禁
+      - '**.md'
   pull_request:
+    paths-ignore:
+      - '**.md'
 
 permissions:
   contents: read
