@@ -117,7 +117,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --title "SSHTarpitWatch ${GITHUB_REF_NAME#v}" \
             --generate-notes \
-            --attach dist/sshtarpitwatch-*-linux-x64.tar.gz \
-            --attach dist/SHA256SUMS.txt
+            dist/sshtarpitwatch-*-linux-x64.tar.gz \
+            dist/SHA256SUMS.txt
