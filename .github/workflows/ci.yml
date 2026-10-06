@@ -1,0 +1,36 @@
+name: CI
+
+# 推送 main / 提交 PR 时跑项目门禁：构建（0 警告）→ 格式检查 → 单元测试
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具链版本
+        run: dotnet --info | head -12
+
+      - name: 缓存 NuGet 包
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: 构建（警告视为错误）
+        run: dotnet build -c Release -warnaserror
+
+      - name: 格式检查
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: 单元测试
+        run: dotnet test -c Release --no-build --no-restore

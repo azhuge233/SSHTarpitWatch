@@ -1,0 +1,123 @@
+name: Release
+
+# 推送 v* 标签 → 出 linux-x64 发布包并建 Release（附 tar.gz 与校验和）
+# 手动触发   → 只构建打包（产物存为工作流附件，可下载试跑，不发 Release）
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 缓存 NuGet 包
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: 构建（警告视为错误）
+        run: dotnet build -c Release -warnaserror
+
+      - name: 格式检查
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: 单元测试
+        run: dotnet test -c Release --no-build --no-restore
+
+  package:
+    needs: gate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 缓存 NuGet 包
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: 安装 NativeAOT 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      - name: 构建宿主信息
+        run: |
+          echo "glibc: $(ldd --version | head -1)"
+          echo "clang: $(clang --version | head -1)"
+
+      - name: 打包（复用仓库内脚本）
+        run: bash scripts/package-release.sh
+
+      - name: 校验标签与产物版本一致
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          name=$(basename "$(ls dist/sshtarpitwatch-*-linux-x64.tar.gz)")
+          version=${name#sshtarpitwatch-}
+          version=${version%-linux-x64.tar.gz}
+          echo "产物版本 = $version ／ 标签 = ${GITHUB_REF_NAME}"
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::标签 ${GITHUB_REF_NAME} 与 csproj 版本 v$version 不一致"
+            exit 1
+          fi
+
+      - name: 校验 glibc 门槛不高于 2.34
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          tar -xzf dist/sshtarpitwatch-*-linux-x64.tar.gz -C "$tmp"
+          bin=$(find "$tmp" -maxdepth 2 -type f -name sshtarpitwatch)
+          floor=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "产物要求的最高 glibc 符号版本 = $floor（README 承诺 glibc ≥ 2.34）"
+          highest=$(printf '%s\n2.34\n' "$floor" | sort -uV | tail -1)
+          if [ "$highest" != "2.34" ]; then
+            echo "::error::glibc 门槛已升至 $floor，超出 README 承诺的 2.34"
+            exit 1
+          fi
+
+      - name: 生成校验和
+        run: sha256sum dist/sshtarpitwatch-*-linux-x64.tar.gz > dist/SHA256SUMS.txt && cat dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          if-no-files-found: error
+          path: |
+            dist/sshtarpitwatch-*-linux-x64.tar.gz
+            dist/SHA256SUMS.txt
+
+  publish:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: dist
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "SSHTarpitWatch ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            --attach dist/sshtarpitwatch-*-linux-x64.tar.gz \
+            --attach dist/SHA256SUMS.txt
