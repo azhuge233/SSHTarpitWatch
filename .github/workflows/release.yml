@@ -88,7 +88,10 @@ jobs:
           fi
 
       - name: 生成校验和
-        run: sha256sum dist/sshtarpitwatch-*-linux-x64.tar.gz > dist/SHA256SUMS.txt && cat dist/SHA256SUMS.txt
+        run: |
+          cd dist
+          sha256sum sshtarpitwatch-*-linux-x64.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v7
         with:
