@@ -1,0 +1,72 @@
+root = true
+
+# 全局默认：UTF-8、LF、行尾清理
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# ===== C#：Tab 缩进 + Allman 大括号 =====
+[*.cs]
+indent_style = tab
+indent_size = 4
+tab_width = 4
+
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = false
+csharp_new_line_before_members_in_anonymous_types = false
+
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+
+# ===== 命名规则：PascalCase / camelCase，一律不用下划线 =====
+dotnet_naming_rule.types_should_be_pascal_case.severity = warning
+dotnet_naming_rule.types_should_be_pascal_case.symbols = types
+dotnet_naming_rule.types_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.types.applicable_kinds = class,struct,interface,enum,delegate,record
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule.members_should_be_pascal_case.severity = warning
+dotnet_naming_rule.members_should_be_pascal_case.symbols = members
+dotnet_naming_rule.members_should_be_pascal_case.style = pascal_case
+dotnet_naming_symbols.members.applicable_kinds = property,method,event
+
+dotnet_naming_rule.locals_should_be_camel_case.severity = warning
+dotnet_naming_rule.locals_should_be_camel_case.symbols = locals_and_params
+dotnet_naming_rule.locals_should_be_camel_case.style = camel_case
+dotnet_naming_symbols.locals_and_params.applicable_kinds = local,parameter
+dotnet_naming_style.camel_case.capitalization = camel_case
+
+# 私有字段：camelCase，且不带任何前缀（含下划线）
+dotnet_naming_rule.private_fields_should_be_camel_case.severity = warning
+dotnet_naming_rule.private_fields_should_be_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_should_be_camel_case.style = camel_case_no_prefix
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.camel_case_no_prefix.capitalization = camel_case
+
+# 接口：I 前缀 + PascalCase
+dotnet_naming_rule.interfaces_should_start_with_i.severity = suggestion
+dotnet_naming_rule.interfaces_should_start_with_i.symbols = interfaces
+dotnet_naming_rule.interfaces_should_start_with_i.style = i_prefixed_pascal_case
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_style.i_prefixed_pascal_case.capitalization = pascal_case
+dotnet_naming_style.i_prefixed_pascal_case.required_prefix = I
+
+# ===== 配置/项目文件：空格缩进 =====
+[*.{json,jsonc,csproj,props,targets,xml}]
+indent_style = space
+indent_size = 2
+
+# ===== Markdown：保留行尾空格（换行语义） =====
+[*.md]
+trim_trailing_whitespace = false

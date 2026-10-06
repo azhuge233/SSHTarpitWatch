@@ -1,0 +1,20 @@
+{
+  "nickname": "home-vps",
+  "port": 2222,
+  "bind_family": "auto",
+  "delay_ms": 10000,
+  "line_length": 32,
+  "max_clients": 4096,
+  "log_level": "info",
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "bot_token": "",
+      "chat_id": ""
+    },
+    "notify_on_connect": true,
+    "notify_on_close": true,
+    "dedup_per_ip_seconds": 300,
+    "max_per_minute": 3
+  }
+}
