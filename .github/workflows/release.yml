@@ -79,8 +79,8 @@ jobs:
           tmp=$(mktemp -d)
           tar -xzf dist/sshtarpitwatch-*-linux-x64.tar.gz -C "$tmp"
           bin=$(find "$tmp" -maxdepth 2 -type f -name sshtarpitwatch)
-          floor=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          echo "产物要求的最高 glibc 符号版本 = $floor（README 承诺 glibc ≥ 2.34）"
+          floor=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -1)
+          echo "产物要求的最高 glibc 符号版本 = GLIBC_$floor（README 承诺 glibc ≥ 2.34）"
           highest=$(printf '%s\n2.34\n' "$floor" | sort -uV | tail -1)
           if [ "$highest" != "2.34" ]; then
             echo "::error::glibc 门槛已升至 $floor，超出 README 承诺的 2.34"
