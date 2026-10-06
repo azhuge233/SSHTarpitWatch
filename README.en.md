@@ -1,6 +1,10 @@
 # SSHTarpitWatch
 
+[中文](README.md) | **English**
+
 An SSH tarpit with connection notifications: keep scanners and brute-forcers stuck, and get notified the moment someone steps in.
+
+> **About this repository**: the code and documentation are **entirely AI-generated** (a human sets the direction and signs off).
 
 ## What it does
 
