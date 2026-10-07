@@ -1,0 +1,47 @@
+# SSHTarpitWatch · docker compose 示例
+#
+# 用法（在本文件所在目录执行）：
+#   mkdir -p config && cp config.example.json config/config.json && $EDITOR config/config.json
+#   chmod 600 config/config.json
+#   docker compose up -d          # 一键启动
+#   docker compose logs -f        # 看日志（Ctrl+C 退出）
+#   docker compose down           # 停止并删除容器
+#
+# 需要按你的环境改的只有两处：user（改成 `id -u`:`id -g` 的输出）与 ports。
+
+services:
+  sshtarpitwatch:
+    image: azhuge233/sshtarpitwatch:latest   # 也可以固定到某个版本，例如 :0.2.0
+    container_name: sshtarpitwatch
+    restart: unless-stopped
+
+    # 以你自己的身份运行：这样 chmod 600 的 config.json 依然读得到
+    user: "1000:1000"
+
+    ports:
+      # 想让焦油坑顶在宿主的 22 端口（真实 SSH 另挪他处）：把左边改成 22
+      - "2222:2222"
+
+    volumes:
+      # 挂载"目录"而不是单个文件——编辑器保存会替换文件，单文件挂载下热重载会读到旧内容
+      - ./config:/data:ro
+      # 镜像内不含时区数据：挂上宿主时区，通知里的时间才与宿主机一致
+      - /etc/localtime:/etc/localtime:ro
+
+    # 以下四项 = 最小权限运行：只读根文件系统、丢弃全部能力、禁止提权、限制内存与进程数
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 256
+
+    # 日志走 stdout；这里限制单个日志文件大小，避免长期运行撑爆磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
