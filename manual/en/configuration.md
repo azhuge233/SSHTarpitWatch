@@ -52,11 +52,11 @@ With it enabled, notifications gain a region line (and an ISP line when a databa
 
 ```
 地区：中国 · 江苏省 · 南京市 (CN)
-ISP：电信
+ISP：电信 (AS4134)
 ```
 
 - **You provide the database files** — the program never downloads them. Put them next to `config.json` (relative paths resolve against that directory) and list them in `notifications.geoip.databases`; **order = priority**, and each field is taken from the first database that has it:
-  - **MMDB** ([DB-IP Lite](https://db-ip.com/db/lite/) is a good starting point — no sign-up, CC BY 4.0): GeoLite2 / DB-IP / IPinfo Lite all work as-is; use a City edition for city-level detail.
+  - **MMDB** ([DB-IP Lite](https://db-ip.com/db/lite/) is a good starting point — no sign-up, CC BY 4.0): GeoLite2 / DB-IP / IPinfo Lite all work as-is; use a City edition for city-level detail; **GeoLite2-ASN** supplies the ASN only (the operator name and the AS number may come from different databases when you list several)
   - **ip2region** ([official](https://github.com/lionsoul2014/ip2region), Apache-2.0): finer Chinese province/city and ISP data; one file for v4 and one for v6.
 - **The language of names depends on which database answers first**: to get 中国 rather than China, list ip2region before the MMDB.
 - **Swapping a database**: replace the file and send `SIGHUP` — the program reopens it when the file's modification time changes.

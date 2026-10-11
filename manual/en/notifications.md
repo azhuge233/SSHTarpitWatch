@@ -13,16 +13,16 @@ By default you get **exactly one notification per connection, sent when it disco
 来源：203.0.113.7:54321 → 本机 :2222
 客户端：SSH-2.0-libssh2_1.11.0
 地区：中国 · 江苏省 · 南京市 (CN)        ← appears once IP geolocation is enabled (see "Configuration")
-ISP：电信                                ← only when a database provides an operator
+ISP：电信 (AS4134)                          ← operator name + AS number (tap to copy the number); only one of them shown if the database supplies just one
 时间：2026-10-11 09:02:03 (UTC+08:00)
 停留：0 小时 12 分 39 秒
 发出：4096 字节
 该 IP 今日第 3 次
-#中国 #CN #江苏省 #南京市              ← region tags (added automatically once IP geolocation is on — tap one to filter messages; #未查到信息 when there is no data)
+#中国 #CN #江苏省 #南京市 #AS4134 #电信    ← region + ISP tags (added automatically once IP geolocation is on — tap one to filter messages)
 ```
 
 - `时间` is the moment the connection was **established** (not when it dropped); `停留` is how long the client was trapped.
-- The trailing **tag line** appears automatically once IP geolocation is enabled (there is no switch): tap a tag to filter messages by country/province/city; with geolocation off the line is omitted entirely.
+- The trailing **tag line** appears automatically once IP geolocation is enabled (there is no switch): tap a tag to filter messages by country/province/city/operator; the **AS number in the ISP line can be tapped to copy** it; with geolocation off the line is omitted entirely.
 - The notification text is currently in Chinese.
 - An empty `nickname` (`""`) shows the system hostname instead.
 - If the client did not report an identification string, the client line shows `—`.

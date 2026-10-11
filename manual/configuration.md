@@ -52,11 +52,11 @@ JSON 允许注释与尾逗号；缺省的键使用默认值。**键名拼错不�
 
 ```
 地区：中国 · 江苏省 · 南京市 (CN)
-ISP：电信
+ISP：电信 (AS4134)
 ```
 
 - **库文件由你自备**，程序不联网取库。把库文件放在 `config.json` 旁边（相对路径即以此目录为基准），在 `notifications.geoip.databases` 里按顺序列出——**顺序 = 优先级**，逐项取第一个给得出的库：
-  - **MMDB**（建议先试 [DB-IP Lite](https://db-ip.com/db/lite/)，免注册、CC BY 4.0）：GeoLite2 / DB-IP / IPinfo Lite 都能直接用；要省市粒度用 City 版（文件大些）
+  - **MMDB**（建议先试 [DB-IP Lite](https://db-ip.com/db/lite/)，免注册、CC BY 4.0）：GeoLite2 / DB-IP / IPinfo Lite 都能直接用；要省市粒度用 City 版（文件大些）；**GeoLite2-ASN** 只给 ASN（与地区库并用时，组织名与 AS 号会分别取各自能给的库）
   - **ip2region**（[官方库](https://github.com/lionsoul2014/ip2region)，Apache-2.0）：中国 IP 的省/市与运营商更细；v4、v6 各一个文件，都列进列表即可
 - **国家名的语言**取决于哪个库先给出：想让中国 IP 显示「中国」（而不是 China），把 ip2region 排在 MMDB 之前。
 - **换库生效**：替换文件后 `SIGHUP` 重载即可（程序按文件 mtime 自动重开）。
