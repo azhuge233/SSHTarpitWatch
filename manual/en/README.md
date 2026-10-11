@@ -2,7 +2,7 @@
 
 [中文](../../README.md) ｜ **English**
 
-An SSH tarpit with connection notifications: keep scanners and brute-forcers stuck, and get notified the moment someone steps in.
+An SSH tarpit with connection notifications: keep scanners and brute-forcers stuck, and get a message each time one finally gives up.
 
 > **About this repository**: the code and documentation are **entirely AI-generated** (a human sets the direction and signs off).
 
@@ -11,11 +11,12 @@ An SSH tarpit with connection notifications: keep scanners and brute-forcers stu
 It runs a fake SSH server (port configurable, default 2222):
 
 - Anyone who tries to SSH into it is slowly fed random data — like [skeeto/endlessh](https://github.com/skeeto/endlessh), the handshake never completes and the connection hangs for hours or days, wasting the attacker's connections and patience. Your real SSH service stays on another port, unaffected.
-- On every connection (and disconnection) it sends you a Telegram notification with:
+- One Telegram notification **per connection, sent when it disconnects** (everything gathered while the client was trapped is merged into it):
   - source IP and port, and the probed local port
   - the client's **identification string** (e.g. `SSH-2.0-libssh2_1.11.0`) — you instantly see what tool it is
-  - time, and the per-IP daily connection count
-  - on disconnect: how long it was trapped and how many bytes were sent
+  - the connect time, and the per-IP daily connection count
+  - how long it was trapped and how many bytes were sent
+- Optional **duration filter**: connections shorter than a configured number of seconds are not reported — connect-and-leave scanner probes are ignored automatically.
 - Configurable instance **nickname**, so you can tell machines apart when they share one notification channel.
 - Built-in **deduplication and rate limiting** to avoid notification floods.
 
@@ -50,7 +51,7 @@ $EDITOR config.json
 | Document | Content |
 |---|---|
 | [Configuration](configuration.md) | Config file location, every key with defaults, a minimal example |
-| [Notifications](notifications.md) | What the messages look like, deduplication and rate limiting |
+| [Notifications](notifications.md) | What the messages look like, duration filter, deduplication and rate limiting |
 | [Command line & signals](cli.md) | Options, exit codes, SIGTERM/SIGHUP/SIGUSR1 |
 | [systemd deployment](systemd.md) | Service file template and notes |
 | [Docker deployment](docker.md) | One-command compose start, image usage, hardening flags, ports and permissions |
