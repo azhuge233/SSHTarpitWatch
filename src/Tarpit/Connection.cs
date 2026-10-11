@@ -11,11 +11,15 @@ namespace SSHTarpitWatch.Tarpit;
 
 /// <summary>
 /// 单条连接（设计 §2）：读客户端首行（与慢滴并发、不阻塞发送）+ 按 accept 锚点慢滴随机行；
+/// 首行读取结束后并发 256B 待读感知对端关闭（FIN / 读错即结束循环，检测粒度不再等于慢滴间隔，设计 §2 步 6）；
 /// 首行读取结束/超时后触发连接通知（步 5）并保留连接期快照（banner/本地端口/连接时刻/当日 N，设计 §3.1），
 /// 收盘记 CLOSE 并入队断开通知（合并模板用该快照）；SO_RCVBUF=1 为 best effort。
 /// </summary>
 internal sealed class Connection
 {
+	/// <summary>待读缓冲（设计 §2 步 6 / §3.4）：256B/连接，首行之后分配并复用；读到的数据一律丢弃。</summary>
+	private const int peerReadBufferBytes = 256;
+
 	private readonly Socket socket;
 	private readonly ConfigStore configStore;
 	private readonly NotifyPipeline notify;
@@ -26,6 +30,9 @@ internal sealed class Connection
 	private string banner = "";
 	private GeoLookupResult geo;
 	private Task connectNotifyTask = Task.CompletedTask;
+
+	/// <summary>停留时长的结束点（单调时钟）= 慢滴循环被打断的瞬间（设计 §2 步 6）；0 = 尚未打断。</summary>
+	private long stayEndTicks;
 
 	/// <summary>连接期快照（设计 §3.1/§3.4）：banner/本地端口/连接时刻/当日 N 随连接保留到断开，随连接对象释放而回收。</summary>
 	private ConnectionSnapshot? connectSnapshot;
@@ -81,9 +88,10 @@ internal sealed class Connection
 		using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(closeCts.Token, stopToken);
 		Task<string> bannerTask = BannerReader.ReadAsync(socket, Host, linked.Token);
 		connectNotifyTask = Task.Run(() => FireConnectNotifyAsync(bannerTask));
+		Task peerCloseTask = WatchPeerCloseAsync(bannerTask, linked.Token);
 		try
 		{
-			await DripAsync(linked.Token).ConfigureAwait(false);
+			await DripAsync(peerCloseTask, linked.Token).ConfigureAwait(false);
 		}
 		catch (Exception ex) when (SocketFailures.IsBenign(ex))
 		{
@@ -99,6 +107,7 @@ internal sealed class Connection
 			{
 				await linked.CancelAsync().ConfigureAwait(false);
 				await AwaitConnectNotifyAsync().ConfigureAwait(false);
+				await AwaitPeerWatchAsync(peerCloseTask).ConfigureAwait(false);
 				LogClose();
 			}
 			finally
@@ -169,30 +178,110 @@ internal sealed class Connection
 	}
 
 	/// <summary>
-	/// 慢滴循环：首行于 accept + delay_ms 发出，此后每 delay_ms 一行（单调时钟锚定 accept 时刻）。
-	/// 每轮取当前配置快照，热重载即刻生效；写失败即收盘（由调用方处理）。
+	/// 设计 §2 步 6：首行读取结束后开始的待读（256B 复用缓冲）——返回 0（FIN）或读异常即对端已离开，
+	/// 任务结束即“对端已离开”信号；读到的数据一律丢弃并继续待读。
+	/// 自身取消（RequestClose / 停止信号 / 正常收尾）静默结束，不算对端离开。
 	/// </summary>
-	private async Task DripAsync(CancellationToken token)
+	private async Task WatchPeerCloseAsync(Task<string> bannerTask, CancellationToken token)
 	{
-		AppConfig config = configStore.Current;
-		long nextDue = acceptedTicks + MillisecondsToTicks(config.Server.DelayMs);
-		while (true)
+		try
 		{
-			if (!await DelayUntilAsync(nextDue, token).ConfigureAwait(false))
-			{
-				return;
-			}
+			await bannerTask.ConfigureAwait(false);
+		}
+		catch (Exception)
+		{
+			// 首行读取的成败由连接通知链路处置（CaptureBannerAsync / AwaitConnectNotifyAsync）：
+			// 这里同样只等“首行阶段结束”，无论结果都进入待读——不抢 banner 字节。
+		}
 
-			AppConfig current = configStore.Current;
-			byte[] line = RandomLine.Generate(current.Server.LineLength);
-			await SendAllAsync(line, token).ConfigureAwait(false);
-			Interlocked.Add(ref bytesSent, line.Length);
-			nextDue += MillisecondsToTicks(current.Server.DelayMs);
+		byte[] buffer = new byte[peerReadBufferBytes];
+		try
+		{
+			while (true)
+			{
+				int received = await socket.ReceiveAsync(buffer, SocketFlags.None, token).ConfigureAwait(false);
+				if (received <= 0)
+				{
+					Log.Debug($"PEER host={Host} port={RemotePort} closed=fin");
+					return;
+				}
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// 自身取消：正常收盘噪音，不算对端已离开
+		}
+		catch (Exception ex) when (SocketFailures.IsBenign(ex))
+		{
+			// 自身取消登记与 socket.Close() 存在竞态：令牌已取消时读错属自我收盘，静默结束（不当对端离开记录）
+			if (!token.IsCancellationRequested)
+			{
+				Log.Debug($"PEER host={Host} port={RemotePort} closed={ex.GetType().Name}");
+			}
 		}
 	}
 
-	/// <summary>读到 dueTicks（单调时钟）为止；被取消返回 false。按绝对值补余量，避免累积漂移。</summary>
-	private static async Task<bool> DelayUntilAsync(long dueTicks, CancellationToken token)
+	/// <summary>
+	/// 等待待读任务退出（设计 §2 步 6）：取消先于等待（收尾已取消 linked token），ReceiveAsync 即刻中断——
+	/// 保证关停不被待读吊住、收盘后不留悬挂的接收；故障只记日志，绝不影响收盘收尾（与 N4 同款口径）。
+	/// </summary>
+	private async Task AwaitPeerWatchAsync(Task peerCloseTask)
+	{
+		try
+		{
+			await peerCloseTask.ConfigureAwait(false);
+		}
+		catch (Exception ex) when (SocketFailures.IsBenign(ex))
+		{
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"PEER watch faulted: {ex.GetType().Name}: {ex.Message}");
+		}
+	}
+
+	/// <summary>
+	/// 慢滴循环（设计 §2 步 6）：首行于 accept + delay_ms 发出，此后每 delay_ms 一行（单调时钟锚定 accept 时刻）。
+	/// 每轮取当前配置快照，热重载即刻生效；对端先在待读上离开即结束循环，写失败照旧抛出（由调用方按原语义收盘）。
+	/// </summary>
+	private async Task DripAsync(Task peerCloseTask, CancellationToken token)
+	{
+		try
+		{
+			AppConfig config = configStore.Current;
+			long nextDue = acceptedTicks + MillisecondsToTicks(config.Server.DelayMs);
+			while (true)
+			{
+				if (!await WaitNextDripAsync(nextDue, peerCloseTask, token).ConfigureAwait(false))
+				{
+					return;
+				}
+
+				if (peerCloseTask.IsCompleted)
+				{
+					// 到点瞬间对端恰好离开（竞态兜底）：不再发这一行
+					return;
+				}
+
+				AppConfig current = configStore.Current;
+				byte[] line = RandomLine.Generate(current.Server.LineLength);
+				await SendAllAsync(line, token).ConfigureAwait(false);
+				Interlocked.Add(ref bytesSent, line.Length);
+				nextDue += MillisecondsToTicks(current.Server.DelayMs);
+			}
+		}
+		finally
+		{
+			// 停留时长的结束点 = 循环被打断的瞬间（设计 §2 步 6）：收尾还要等连接通知与地区查询，不能算进停留时长
+			stayEndTicks = Stopwatch.GetTimestamp();
+		}
+	}
+
+	/// <summary>
+	/// 等待下一个慢滴时刻（设计 §2 步 6）：到点返回 true；等待期间对端先行离开（待读结束）或收到取消返回 false——
+	/// 两者都立刻结束循环。按绝对值补余量，避免累积漂移。
+	/// </summary>
+	private static async Task<bool> WaitNextDripAsync(long dueTicks, Task peerCloseTask, CancellationToken token)
 	{
 		while (true)
 		{
@@ -203,9 +292,16 @@ internal sealed class Connection
 			}
 
 			long remainingMs = Math.Max(1, remainingTicks * 1000 / Stopwatch.Frequency);
+			Task delayTask = Task.Delay(TimeSpan.FromMilliseconds(Math.Min(remainingMs, int.MaxValue)), token);
+			Task first = await Task.WhenAny(delayTask, peerCloseTask).ConfigureAwait(false);
+			if (first == peerCloseTask)
+			{
+				return false;
+			}
+
 			try
 			{
-				await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(remainingMs, int.MaxValue)), token).ConfigureAwait(false);
+				await delayTask.ConfigureAwait(false);
 			}
 			catch (OperationCanceledException)
 			{
@@ -259,7 +355,9 @@ internal sealed class Connection
 	/// <summary>收盘日志（设计 §6）：CLOSE host=... port=... time=秒.毫秒 bytes=发出字节；随后入队断开通知。</summary>
 	private void LogClose()
 	{
-		TimeSpan elapsed = Stopwatch.GetElapsedTime(acceptedTicks);
+		// 停留时长的结束点 = 慢滴循环被打断的瞬间（DripAsync 退出时记点，设计 §2 步 6）；兜底当前时刻（防御）
+		long endTicks = stayEndTicks != 0 ? stayEndTicks : Stopwatch.GetTimestamp();
+		TimeSpan elapsed = Stopwatch.GetElapsedTime(acceptedTicks, endTicks);
 		long sent = BytesSent;
 		Stats.CountClose(elapsed.TotalSeconds, sent);
 		Log.Info(string.Create(

@@ -114,6 +114,78 @@ public sealed class TarpitServerTests
 	}
 
 	[TestMethod]
+	public async Task Server_ClientDisconnectsEarly_DurationIsImmediate()
+	{
+		// 时长精度（设计 §2 步 6）：delay_ms=10000 时连接约 0.2 秒即断开——旧行为要等下一次慢滴写入才发现（记 ≥10 秒），
+		// 新行为以待读感知到对端离开的瞬间为断开时刻；CLOSE 日志与断开通知两处断言
+		await using Harness harness = StartServer(delayMs: 10000);
+		using Socket client = Connect(harness.Port);
+
+		await Task.Delay(200);
+		client.Close();
+
+		await TestSupport.WaitUntilAsync(
+			() => CountOccurrences(harness.LogText, "CLOSE host=") >= 1, "CLOSE 日志出现");
+		Match close = Regex.Match(harness.LogText, @"CLOSE host=(\S+) port=(\d+) time=(\d+\.\d{3}) bytes=(\d+)");
+		Assert.IsTrue(close.Success, "CLOSE 行应含 host/port/time/bytes");
+		double logSeconds = double.Parse(close.Groups[3].Value, CultureInfo.InvariantCulture);
+		Assert.IsTrue(logSeconds < 2.0, $"停留时长应即时感知对端关闭（<2s；旧行为 ≥10s）：CLOSE 实测 {logSeconds:F3}s");
+
+		await TestSupport.WaitUntilAsync(
+			() => harness.Notifier.Texts.Any(text => text.Contains("连接断开")), "断开通知送达");
+		string closeText = harness.Notifier.Texts.First(text => text.Contains("连接断开"));
+		Match duration = Regex.Match(closeText, @"停留：(\d+) 小时 (\d+) 分 (\d+) 秒");
+		Assert.IsTrue(duration.Success, "断开通知应含「停留：X 小时 Y 分 Z 秒」");
+		double notifySeconds = (int.Parse(duration.Groups[1].Value, CultureInfo.InvariantCulture) * 3600)
+			+ (int.Parse(duration.Groups[2].Value, CultureInfo.InvariantCulture) * 60)
+			+ int.Parse(duration.Groups[3].Value, CultureInfo.InvariantCulture);
+		Assert.IsTrue(notifySeconds < 2, $"断开通知的停留时长应 <2s：实测 {notifySeconds}s（{duration.Value}）");
+	}
+
+	[TestMethod]
+	public async Task Server_PeerSendsContinuously_ConnectionSurvivesAndDrips()
+	{
+		// 待读把对端数据一律丢弃并继续待读（设计 §2 步 6）：持续发数据不应让连接提前结束、慢滴应照常
+		const int delayMs = 200; // 与 AssertInterval 的容差配套：下界 delayMs-150 仍具约束力
+		const int sendIntervalMs = 100;
+		await using Harness harness = StartServer(delayMs: delayMs);
+		using Socket client = Connect(harness.Port);
+		SendAll(client, "SSH-2.0-live\n");
+		Frame first = await ReadFrameAsync(client, TimeSpan.FromSeconds(3), "首行");
+
+		// 约 1.2 秒内每 100ms 发 1 字节：首行阶段已结束 → 这些字节都落在待读上
+		using CancellationTokenSource sending = new(TimeSpan.FromSeconds(1.2));
+		byte[] one = [(byte)'x'];
+		Task sender = Task.Run(async () =>
+		{
+			try
+			{
+				while (true)
+				{
+					client.Send(one, SocketFlags.None);
+					await Task.Delay(sendIntervalMs, sending.Token).ConfigureAwait(false);
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				// 发送窗口结束
+			}
+		});
+
+		Frame second = await ReadFrameAsync(client, TimeSpan.FromSeconds(3), "对端发数据期间第二行");
+		Frame third = await ReadFrameAsync(client, TimeSpan.FromSeconds(3), "对端发数据期间第三行");
+		AssertInterval(first, second, delayMs, "第一→第二行（对端持续发数据）");
+		AssertInterval(second, third, delayMs, "第二→第三行（对端持续发数据）");
+		await sender;
+		Assert.AreEqual(0, CountOccurrences(harness.LogText, "CLOSE host="), "对端持续发数据不应让连接提前结束（待读不误判）");
+
+		// 数据流停下后真正断开：待读照常感知
+		client.Close();
+		await TestSupport.WaitUntilAsync(
+			() => CountOccurrences(harness.LogText, "CLOSE host=") >= 1, "断开后 CLOSE 日志出现");
+	}
+
+	[TestMethod]
 	public async Task Server_Shutdown_ClosesAllConnectionsWithOneCloseLogEach()
 	{
 		await using Harness harness = StartServer(delayMs: 1000);
@@ -126,6 +198,21 @@ public sealed class TarpitServerTests
 
 		Assert.AreEqual(2, CountOccurrences(harness.LogText, "CLOSE host="), "CLOSE 条数应等于连接数");
 		Assert.IsFalse(harness.LogText.Contains("did not close in time"), "优雅退出不应出现收盘超时");
+	}
+
+	[TestMethod]
+	public async Task Server_ShutdownWithPendingPeerRead_ClosesPromptly()
+	{
+		// 验收③（设计 §2 步 6）：待读挂在 ReceiveAsync 上时关停——连接照常记 CLOSE，等待不被吊住
+		await using Harness harness = StartServer(delayMs: fastDelayMs);
+		using Socket client = Connect(harness.Port);
+		SendAll(client, "SSH-2.0-watch\n"); // 首行结束后待读进入挂起接收
+		await ReadFrameAsync(client, TimeSpan.FromSeconds(3), "首行");
+
+		await harness.Server.ShutdownAsync();
+
+		Assert.AreEqual(1, CountOccurrences(harness.LogText, "CLOSE host="), "关停应记一条 CLOSE");
+		Assert.IsFalse(harness.LogText.Contains("did not close in time"), "待读不应吊住关停");
 	}
 
 	[TestMethod]
