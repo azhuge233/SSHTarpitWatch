@@ -29,7 +29,8 @@ public sealed class GeoMessageTests
 			+ "时间：2026-10-11 09:12:00 (UTC+08:00)\n"
 			+ "停留：1 小时 1 分 1 秒\n"
 			+ "发出：12345 字节\n"
-			+ "该 IP 今日第 3 次",
+			+ "该 IP 今日第 3 次\n"
+			+ "#中国 #CN #广东省 #深圳市",
 			text);
 	}
 
@@ -58,7 +59,8 @@ public sealed class GeoMessageTests
 			+ "地区：中国 · 广东省 · 深圳市 (CN)\n"
 			+ "ISP：电信\n"
 			+ "时间：2026-10-11 09:12:00 (UTC+08:00)\n"
-			+ "该 IP 今日第 2 次",
+			+ "该 IP 今日第 2 次\n"
+			+ "#中国 #CN #广东省 #深圳市",
 			text);
 	}
 
@@ -111,6 +113,50 @@ public sealed class GeoMessageTests
 		Assert.IsTrue(
 			NotifyMessage.Build(CloseEvent(default), "box", local).Contains("客户端：", StringComparison.Ordinal),
 			"（对照）地区行缺失不影响其余模板行");
+	}
+
+	[TestMethod]
+	public void Template_TagLine_Rules()
+	{
+		// R3.9：Telegram 通知自动追加标签行（无配置键）；仅地区 tag（不设 IP tag）、有哪级出哪级
+		StringAssert.Contains(
+			CloseText(GeoResult("中国", "CN", "广东省", "深圳市", "电信")),
+			"\n#中国 #CN #广东省 #深圳市",
+			"四级齐全（国家名 → 国家码 → 省 → 市）");
+		StringAssert.Contains(CloseText(GeoResult("中国", "CN", "", "", "")), "\n#中国 #CN", "无省无市");
+		StringAssert.Contains(CloseText(GeoResult("", "CN", "", "", "")), "\n#CN", "只有国家码");
+
+		// 非 Telegram 合法字符（空格 / 点 / 斜杠…）替换为下划线
+		StringAssert.Contains(
+			CloseText(GeoResult("United States", "US", "New York", "", "")),
+			"\n#United_States #US #New_York",
+			"空格 → 下划线");
+
+		// 启用但无地区信息（库缺失 / 无查询结果 / 只有 ISP 的库）→ #未查到信息
+		StringAssert.Contains(CloseText(GeoLookupResult.Missing), "\n#未查到信息");
+		StringAssert.Contains(CloseText(GeoLookupResult.NoRecord), "\n#未查到信息");
+		StringAssert.Contains(CloseText(GeoResult("", "", "", "", "AS13335 CLOUDFLARENET")), "\n#未查到信息", "只有 ISP → 无地区信息");
+
+		// geoip 未启用（含默认值路径）→ 整行不出现
+		Assert.IsFalse(CloseText(GeoLookupResult.Disabled).Contains("\n#", StringComparison.Ordinal), "未启用 → 不打标签");
+		Assert.IsFalse(
+			NotifyMessage.Build(CloseEvent(default), "box", local).Contains("\n#", StringComparison.Ordinal),
+			"事件默认值同语义");
+
+		// 连接条同样自动带标签行（无开关）
+		NotifyEvent connect = new()
+		{
+			Kind = NotifyEventKind.Connect,
+			Host = "198.51.100.9",
+			Port = 40000,
+			LocalPort = 2222,
+			Banner = "SSH-2.0-test",
+			TodayCount = 2,
+			TimeUtc = local,
+			ConnectTimeUtc = local,
+			Geo = GeoLookupResult.Found(GeoResult("中国", "CN", "广东省", "深圳市", "电信")),
+		};
+		StringAssert.Contains(NotifyMessage.Build(connect, "box", local), "\n#中国 #CN #广东省 #深圳市");
 	}
 
 	/// <summary>取出消息里的地区行（逐字符断言的载体）。</summary>

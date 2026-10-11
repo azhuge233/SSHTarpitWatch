@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using SSHTarpitWatch.Geo;
 
 namespace SSHTarpitWatch.Notify;
@@ -18,6 +19,9 @@ internal static class NotifyMessage
 
 	/// <summary>无查询结果提示文案（设计 §3.6 / R5.4：库可读但该 IP 无记录）。</summary>
 	public const string GeoNoRecord = "无查询结果";
+
+	/// <summary>无地区信息时的标签文案（R3.9：geoip 启用但库缺失 / 无查询结果）。</summary>
+	public const string GeoUnknownTag = "未查到信息";
 
 	/// <summary>按事件类型渲染（localTime = 事件连接时刻的服务器本地换算）。</summary>
 	public static string Build(NotifyEvent evt, string nickname, DateTimeOffset localTime) => evt.Kind switch
@@ -61,7 +65,7 @@ internal static class NotifyMessage
 		+ $"客户端：{FormatBanner(evt.Banner)}\n"
 		+ $"{FormatGeoLines(evt.Geo)}"
 		+ $"时间：{localTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} (UTC{FormatOffset(localTime.Offset)})\n"
-		+ $"该 IP 今日第 {evt.TodayCount} 次");
+		+ $"该 IP 今日第 {evt.TodayCount} 次{FormatTagLine(evt.Geo)}");
 
 	/// <summary>断开条（默认唯一一条，与连接期信息合并——来源/本地端口/客户端/连接时刻/停留/字节/当日 N）。</summary>
 	private static string BuildClose(NotifyEvent evt, string nickname, DateTimeOffset localTime) => string.Create(
@@ -73,7 +77,50 @@ internal static class NotifyMessage
 		+ $"时间：{localTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} (UTC{FormatOffset(localTime.Offset)})\n"
 		+ $"停留：{FormatDuration(evt.DurationSeconds)}\n"
 		+ $"发出：{evt.BytesSent} 字节\n"
-		+ $"该 IP 今日第 {evt.TodayCount} 次");
+		+ $"该 IP 今日第 {evt.TodayCount} 次{FormatTagLine(evt.Geo)}");
+
+	/// <summary>
+	/// 标签行（R3.9，2026-10-11 定稿）：Telegram 通知自动追加、无配置键；仅地区 tag（不设 IP tag）。
+	/// geoip 未启用（NoDatabase）→ 整行不出现；启用但无地区信息（库缺失 / 无查询结果）→ `#未查到信息`；
+	/// 查到结果 → `#国家名 #国家码 #省 #市`（有哪级出哪级；非字母/数字/下划线字符替换为 `_`）。
+	/// 返回带前导换行的整行（无内容返回空串）。
+	/// </summary>
+	private static string FormatTagLine(GeoLookupResult geo)
+	{
+		if (geo.Status == GeoStatus.NoDatabase)
+		{
+			return "";
+		}
+
+		if (geo.Status != GeoStatus.Ok || geo.Result is not GeoResult result)
+		{
+			return $"\n#{GeoUnknownTag}";
+		}
+
+		List<string> tags = [];
+		foreach (string value in new[] { result.Country, result.CountryCode, result.Region, result.City })
+		{
+			string tag = ToHashtag(value);
+			if (tag.Length > 0)
+			{
+				tags.Add($"#{tag}");
+			}
+		}
+
+		return tags.Count == 0 ? $"\n#{GeoUnknownTag}" : $"\n{string.Join(" ", tags)}";
+	}
+
+	/// <summary>Telegram 标签净化：仅保留字母 / 数字 / 下划线（其余替换为 `_`），去首尾下划线；全非法则返回空串。</summary>
+	private static string ToHashtag(string value)
+	{
+		StringBuilder builder = new(value.Length);
+		foreach (char ch in value)
+		{
+			builder.Append(char.IsLetterOrDigit(ch) ? ch : '_');
+		}
+
+		return builder.ToString().Trim('_');
+	}
 
 	private static string FormatBanner(string banner) => banner.Length == 0 ? NoBanner : banner;
 

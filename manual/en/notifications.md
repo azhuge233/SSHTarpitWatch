@@ -18,9 +18,11 @@ ISP：电信                                ← only when a database provides an
 停留：0 小时 12 分 39 秒
 发出：4096 字节
 该 IP 今日第 3 次
+#中国 #CN #江苏省 #南京市              ← region tags (added automatically once IP geolocation is on — tap one to filter messages; #未查到信息 when there is no data)
 ```
 
 - `时间` is the moment the connection was **established** (not when it dropped); `停留` is how long the client was trapped.
+- The trailing **tag line** appears automatically once IP geolocation is enabled (there is no switch): tap a tag to filter messages by country/province/city; with geolocation off the line is omitted entirely.
 - The notification text is currently in Chinese.
 - An empty `nickname` (`""`) shows the system hostname instead.
 - If the client did not report an identification string, the client line shows `—`.
@@ -48,7 +50,7 @@ Test notification (sent by `--test-notify`, deliberately distinct from real even
 `notifications.filter.min_duration_seconds` (default `0` = no filter): only connections lasting **at least** this many seconds are reported. Scanners that connect and immediately leave are ignored automatically; together with the default one-message-on-disconnect behaviour, your notification volume drops from "one per probe" to "one per real entanglement".
 
 - The decision uses the config value **at disconnect time** — a reload (`SIGHUP`) applies immediately to connections already hanging.
-- **Duration resolution ≈ the drip interval**: the program only notices that a client left when it next writes to it — every `server.delay_ms` (10 seconds by default). So the "time trapped" is measured to roughly that resolution: a scanner that connects and leaves in 0.1 s may be recorded as ~10 s. To reliably filter such probes, set the threshold clearly above `server.delay_ms` (60 s or more with the default settings); lowering `server.delay_ms` sharpens the measurement (at the cost of a faster drip and more bandwidth — the opposite of the tarpit's "trap as cheaply as possible" intent).
+- **Duration accuracy**: a client's departure (FIN/RST) is noticed **immediately** — after the first line is read the program keeps a pending read, so the recorded time trapped is the real one (measured: a 2-second connection reports 2.005 s, a 0.3-second one 0.302 s). You can safely lower the threshold; the only exception is a **silent disappearance without FIN** (e.g. a broken network path), which is still noticed at the next drip write (off by at most one `server.delay_ms`).
 - A connection dropped by the duration filter does **not** consume that IP's cooldown budget and does not affect later connections from the same IP.
 - It still **counts towards** "today's Nth connection from this IP".
 
