@@ -60,5 +60,6 @@ docker logs -f sshtarpitwatch
 - **Permissions**: run as yourself (the compose `user:` or `docker run --user`), so a `chmod 600` config stays readable and the container never modifies host files.
 - **Time zone**: the image ships no timezone data (part of why it is so small); mount `/etc/localtime` to match the host, otherwise times show UTC.
 - **Logs**: everything goes to stdout (`docker logs` / `docker compose logs`); the compose example already caps log files at 10m×3.
+- **IP geolocation databases (optional)**: put the database files (`.mmdb` / `.xdb`) in the **same directory as `config.json`** — compose mounts `./config` at `/data` and relative paths resolve against the config file's directory, so dropping them into `config/` is enough.
 - **Uninstall**: `docker compose down` (or `docker rm -f sshtarpitwatch`), then delete the config directory.
 - **Firewall**: Docker publishes ports by writing iptables rules directly, bypassing ufw-style rules — your exposure is exactly what `ports` / `-p` says.

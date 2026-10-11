@@ -23,6 +23,9 @@ JSON comments and trailing commas are allowed; missing keys fall back to their d
 | `notifications.filter.min_duration_seconds` | int (≥0) | `0` | Only notify connections lasting **at least** this many seconds (0 = no filter) |
 | `notifications.throttle.per_ip_seconds` | int (≥0) | `300` | Per-IP cooldown in seconds; 0 = off |
 | `notifications.throttle.max_per_minute` | int (≥1) | `3` | Global notifications per minute |
+| `notifications.geoip.enabled` | bool | `false` | IP geolocation switch (offline database, see "IP geolocation" below) |
+| `notifications.geoip.databases` | string[] | `[]` | Database file paths (order = priority; relative paths resolve against the **config file's directory**) |
+| `notifications.geoip.language` | string | `"zh"` | Language for names; common values `zh` / `en` / `ja` / `ru` / `es` / `pt` / `de` / `fr` / `ko` / `fa` (falls back to English when the database lacks it) |
 
 - With `notifications.telegram.enabled=true`, `bot_token` and `chat_id` must be non-empty, otherwise startup fails with exit code 1.
 - Setting both `on_connect` and `on_close` to `false` is allowed: the tarpit keeps trapping, logging and counting as usual — it simply sends no notifications; startup prints a warning reminding you of that state.
@@ -38,6 +41,23 @@ JSON comments and trailing commas are allowed; missing keys fall back to their d
   }
 }
 ```
+
+## IP geolocation (optional)
+
+With it enabled, notifications gain a region line (and an ISP line when a database provides one):
+
+```
+地区：中国 · 江苏省 · 南京市 (CN)
+ISP：电信
+```
+
+- **You provide the database files** — the program never downloads them. Put them next to `config.json` (relative paths resolve against that directory) and list them in `notifications.geoip.databases`; **order = priority**, and each field is taken from the first database that has it:
+  - **MMDB** ([DB-IP Lite](https://db-ip.com/db/lite/) is a good starting point — no sign-up, CC BY 4.0): GeoLite2 / DB-IP / IPinfo Lite all work as-is; use a City edition for city-level detail.
+  - **ip2region** ([official](https://github.com/lionsoul2014/ip2region), Apache-2.0): finer Chinese province/city and ISP data; one file for v4 and one for v6.
+- **The language of names depends on which database answers first**: to get 中国 rather than China, list ip2region before the MMDB.
+- **Swapping a database**: replace the file and send `SIGHUP` — the program reopens it when the file's modification time changes.
+- **Degradation**: `enabled=true` with an unreadable database → a startup warning plus `地区：库缺失`; a readable database with no record for the address → `地区：无查询结果`; `enabled=false` → the region line never appears.
+- Data-source licenses are listed under [Credits](../../README.md#credits) — keep the attribution each of them asks for.
 
 ## Migrating an older config
 

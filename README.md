@@ -17,6 +17,7 @@ SSH 焦油坑 + 连接通知：把扫描器和暴力破解者吊住，并在每�
   - 连接建立的时间、该 IP 当日的第几次连接
   - 被吊了多久、发出了多少字节
 - 可按**停留时长过滤**：不足指定秒数的连接不通知。“连上就走”的扫描探测器会被自动忽略。
+- 可选：**IP 地区解析**——自备离线库（MMDB / ip2region），通知里直接标出国家/省市与运营商。
 - 支持配置**实例昵称**：多台机器共用一个通知渠道时，一眼分辨消息来自哪台。
 - 内置**去重与限速**：同一 IP 冷却期内只报一次、全局每分钟限流，防刷屏。
 
@@ -71,3 +72,4 @@ SSH 协议要求客户端在连接建立后立刻发送自己的身份串（如 
 
 - 机制对标 **[skeeto/endlessh](https://github.com/skeeto/endlessh)**（SSH 焦油坑的经典实现，公有领域）——本项目为**独立实现**（C#），不包含其代码。
 - 灵感亦来自 **[shizunge/endlessh-go](https://github.com/shizunge/endlessh-go)**（endlessh 的现代 Go 实现）。
+- IP 地区解析的**实现思路参考** **[zu1k/nali](https://github.com/zu1k/nali)**（离线 IP 查询工具）；查询数据来自你自己准备的离线库——如 [DB-IP Lite](https://db-ip.com/db/lite/)（CC BY 4.0）、[IPinfo Lite](https://ipinfo.io/lite)（CC BY-SA 4.0）、[ip2region](https://github.com/lionsoul2014/ip2region)（Apache-2.0）——请按各自许可保留署名。

@@ -60,5 +60,6 @@ docker logs -f sshtarpitwatch
 - **权限**：以你自己的身份运行（compose 里的 `user:` 或 `docker run` 的 `--user`），`chmod 600` 的配置依然可读；容器也不会改动宿主上的任何文件。
 - **时区**：镜像不含时区数据（体积小的一部分原因），挂上 `/etc/localtime` 通知时间就与宿主机一致；不挂则显示 UTC。
 - **日志**：全部走 stdout（`docker logs` / `docker compose logs`）；compose 示例里已限制日志文件大小为 10m×3。
+- **IP 地区库（可选）**：把库文件（`.mmdb` / `.xdb`）与 `config.json` 放在**同一个目录**——compose 已把 `./config` 挂到 `/data`，相对路径以配置文件目录为基准，所以放进 `config/` 就好。
 - **卸载**：`docker compose down`（或 `docker rm -f sshtarpitwatch`），再删掉配置目录即可。
 - **防火墙**：Docker 发布端口是直接写 iptables 的，会绕过 ufw 一类的规则——暴露面完全由 `ports` / `-p` 参数决定。

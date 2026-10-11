@@ -23,6 +23,9 @@ JSON 允许注释与尾逗号；缺省的键使用默认值。**键名拼错、�
 | `notifications.filter.min_duration_seconds` | int（≥0） | `0` | 只通知停留**达到**该秒数的连接（0 = 不过滤） |
 | `notifications.throttle.per_ip_seconds` | int（≥0） | `300` | 每 IP 冷却秒数；0 = 关闭 |
 | `notifications.throttle.max_per_minute` | int（≥1） | `3` | 全局每分钟通知上限 |
+| `notifications.geoip.enabled` | bool | `false` | IP 地区解析开关（离线库，见下文「IP 地区解析」） |
+| `notifications.geoip.databases` | string[] | `[]` | 库文件路径列表（顺序 = 优先级；相对路径以**配置文件所在目录**为基准） |
+| `notifications.geoip.language` | string | `"zh"` | 地区名语言；常用值 `zh` / `en` / `ja` / `ru` / `es` / `pt` / `de` / `fr` / `ko` / `fa`（库缺该语言时回退英文） |
 
 - `notifications.telegram.enabled=true` 时 `bot_token` 与 `chat_id` 必须非空，否则启动报错退出（退出码 1）。
 - `on_connect` 与 `on_close` 同时为 `false` 是允许的：程序照常困住连接、照常记日志与统计，只是不发通知；启动时会打印一条警告提醒你这个状态。
@@ -38,6 +41,23 @@ JSON 允许注释与尾逗号；缺省的键使用默认值。**键名拼错、�
   }
 }
 ```
+
+## IP 地区解析（可选）
+
+开启后，通知里会多出一行地区（库提供运营商时再多一行）：
+
+```
+地区：中国 · 江苏省 · 南京市 (CN)
+ISP：电信
+```
+
+- **库文件由你自备**，程序不联网取库。把库文件放在 `config.json` 旁边（相对路径即以此目录为基准），在 `notifications.geoip.databases` 里按顺序列出——**顺序 = 优先级**，逐项取第一个给得出的库：
+  - **MMDB**（建议先试 [DB-IP Lite](https://db-ip.com/db/lite/)，免注册、CC BY 4.0）：GeoLite2 / DB-IP / IPinfo Lite 都能直接用；要省市粒度用 City 版（文件大些）
+  - **ip2region**（[官方库](https://github.com/lionsoul2014/ip2region)，Apache-2.0）：中国 IP 的省/市与运营商更细；v4、v6 各一个文件，都列进列表即可
+- **国家名的语言**取决于哪个库先给出：想让中国 IP 显示「中国」（而不是 China），把 ip2region 排在 MMDB 之前。
+- **换库生效**：替换文件后 `SIGHUP` 重载即可（程序按文件 mtime 自动重开）。
+- **降级表现**：`enabled=true` 但库文件读不到 → 启动打印警告，通知显示 `地区：库缺失`；库正常但该 IP 无记录 → `地区：无查询结果`；`enabled=false` → 通知里不出现地区行。
+- 数据来源的许可见 [Credits](../README.md#credits)（按各自许可保留署名）。
 
 ## 旧版配置迁移
 

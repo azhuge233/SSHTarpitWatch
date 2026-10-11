@@ -12,6 +12,8 @@ By default you get **exactly one notification per connection, sent when it disco
 🕳 home-vps · SSHTarpitWatch · 连接断开
 来源：203.0.113.7:54321 → 本机 :2222
 客户端：SSH-2.0-libssh2_1.11.0
+地区：中国 · 江苏省 · 南京市 (CN)        ← appears once IP geolocation is enabled (see "Configuration")
+ISP：电信                                ← only when a database provides an operator
 时间：2026-10-11 09:02:03 (UTC+08:00)
 停留：0 小时 12 分 39 秒
 发出：4096 字节
