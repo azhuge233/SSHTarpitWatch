@@ -65,7 +65,8 @@ internal sealed class NotifyWorker
 	{
 		AppConfig snapshot = configStore.Current;
 		string nickname = NotifyMessage.ResolveNickname(snapshot.Nickname);
-		DateTimeOffset local = TimeZoneInfo.ConvertTime(evt.TimeUtc, timeProvider.LocalTimeZone);
+		// 模板的「时间」= 连接建立时刻（断开条经连接期快照带到断开时刻，设计 §3.1/§3.3）
+		DateTimeOffset local = TimeZoneInfo.ConvertTime(evt.ConnectTimeUtc, timeProvider.LocalTimeZone);
 		string text = NotifyMessage.Build(evt, nickname, local);
 		for (int attempt = 0; ; attempt++)
 		{

@@ -10,7 +10,8 @@ namespace SSHTarpitWatch.Tarpit;
 
 /// <summary>
 /// 单条连接（设计 §2）：读客户端首行（与慢滴并发、不阻塞发送）+ 按 accept 锚点慢滴随机行；
-/// 首行读取结束/超时后触发连接通知（步 5），收盘记 CLOSE 并入队断开通知；SO_RCVBUF=1 为 best effort。
+/// 首行读取结束/超时后触发连接通知（步 5）并保留连接期快照（banner/本地端口/连接时刻/当日 N，设计 §3.1），
+/// 收盘记 CLOSE 并入队断开通知（合并模板用该快照）；SO_RCVBUF=1 为 best effort。
 /// </summary>
 internal sealed class Connection
 {
@@ -22,7 +23,9 @@ internal sealed class Connection
 	private long bytesSent;
 	private string banner = "";
 	private Task connectNotifyTask = Task.CompletedTask;
-	private bool connectGatePassed;
+
+	/// <summary>连接期快照（设计 §3.1/§3.4）：banner/本地端口/连接时刻/当日 N 随连接保留到断开，随连接对象释放而回收。</summary>
+	private ConnectionSnapshot? connectSnapshot;
 
 	public Connection(Socket socket, ConfigStore configStore, NotifyPipeline notify)
 	{
@@ -88,20 +91,29 @@ internal sealed class Connection
 		}
 		finally
 		{
-			await linked.CancelAsync().ConfigureAwait(false);
-			await AwaitConnectNotifyAsync().ConfigureAwait(false);
-			LogClose();
-			socket.Dispose();
+			try
+			{
+				await linked.CancelAsync().ConfigureAwait(false);
+				await AwaitConnectNotifyAsync().ConfigureAwait(false);
+				LogClose();
+			}
+			finally
+			{
+				socket.Dispose();
+			}
 		}
 	}
 
-	/// <summary>设计 §2 步 5：首行读取结束/超时后触发连接通知；取回身份串并记住去重闸结果供断开条跟随。</summary>
+	/// <summary>
+	/// 设计 §2 步 5：首行读取结束/超时后触发连接通知；取回身份串，并保留连接期快照
+	/// （banner/本地端口/连接时刻/当日 N/过闸标记）供断开时的合并断开条使用（设计 §3.1）。
+	/// </summary>
 	private async Task FireConnectNotifyAsync(Task<string> bannerTask)
 	{
 		banner = await CaptureBannerAsync(bannerTask).ConfigureAwait(false);
 		try
 		{
-			connectGatePassed = notify.EnqueueConnect(Host, RemotePort, LocalPort, banner).GatePassed;
+			connectSnapshot = notify.EnqueueConnect(Host, RemotePort, LocalPort, banner).Snapshot;
 		}
 		catch (Exception ex)
 		{
@@ -110,7 +122,11 @@ internal sealed class Connection
 		}
 	}
 
-	/// <summary>确保 connect 事件先于 close 事件入队（首行读取可能在收盘时才被取消收尾）。</summary>
+	/// <summary>
+	/// 确保 connect 事件先于 close 事件入队（首行读取可能在收盘时才被取消收尾）。
+	/// 异常一律就地消化（只记日志）：这里的失败绝不允许跳过收盘收尾（CLOSE 日志 / 断开通知 / 套接字释放）——
+	/// 通知链路故障绝不影响困住逻辑（N4）。
+	/// </summary>
 	private async Task AwaitConnectNotifyAsync()
 	{
 		try
@@ -119,6 +135,11 @@ internal sealed class Connection
 		}
 		catch (Exception ex) when (SocketFailures.IsBenign(ex))
 		{
+			// 正常的收盘噪音（对端断开 / 取消 / 套接字已释放）：无需记录
+		}
+		catch (Exception ex)
+		{
+			Log.Error($"NOTIFY connect task faulted: {ex.GetType().Name}: {ex.Message}");
 		}
 	}
 
@@ -129,7 +150,7 @@ internal sealed class Connection
 	private async Task DripAsync(CancellationToken token)
 	{
 		AppConfig config = configStore.Current;
-		long nextDue = acceptedTicks + MillisecondsToTicks(config.DelayMs);
+		long nextDue = acceptedTicks + MillisecondsToTicks(config.Server.DelayMs);
 		while (true)
 		{
 			if (!await DelayUntilAsync(nextDue, token).ConfigureAwait(false))
@@ -138,10 +159,10 @@ internal sealed class Connection
 			}
 
 			AppConfig current = configStore.Current;
-			byte[] line = RandomLine.Generate(current.LineLength);
+			byte[] line = RandomLine.Generate(current.Server.LineLength);
 			await SendAllAsync(line, token).ConfigureAwait(false);
 			Interlocked.Add(ref bytesSent, line.Length);
-			nextDue += MillisecondsToTicks(current.DelayMs);
+			nextDue += MillisecondsToTicks(current.Server.DelayMs);
 		}
 	}
 
@@ -221,13 +242,20 @@ internal sealed class Connection
 			$"CLOSE host={Host} port={RemotePort} time={elapsed.TotalSeconds:F3} bytes={sent}"));
 		try
 		{
-			notify.EnqueueClose(Host, RemotePort, elapsed.TotalSeconds, sent, connectGatePassed);
+			notify.EnqueueClose(CloseSnapshot(), elapsed.TotalSeconds, sent);
 		}
 		catch (Exception ex)
 		{
 			Log.Error($"NOTIFY enqueue_error kind=close host={Host} error={ex.GetType().Name}: {ex.Message}");
 		}
 	}
+
+	/// <summary>
+	/// 断开条所需的连接期快照（设计 §3.1）：正常路径由连接通知入队时产出；
+	/// 连接通知入队异常（N4 兜底路径）时用本地已知信息兜底，保证断开条不因通知链路故障而丢失。
+	/// </summary>
+	private ConnectionSnapshot CloseSnapshot() => connectSnapshot
+		?? new ConnectionSnapshot(Host, RemotePort, LocalPort, banner, DateTimeOffset.UtcNow, 0, GatePassed: false);
 
 	private static (string Host, int RemotePort, int LocalPort) DescribeEndpoints(Socket socket)
 	{

@@ -21,11 +21,12 @@ internal static class TestSupport
 		return port;
 	}
 
-	/// <summary>构造通知配置（默认：渠道开、两开关开、去重关、限速 60/分）。</summary>
+	/// <summary>构造通知配置（默认：渠道开、两开关开、时长闸关、去重关、限速 60/分）。</summary>
 	public static AppConfig Notifications(
 		bool enabled = true,
 		bool onConnect = true,
 		bool onClose = true,
+		int minDurationSeconds = 0,
 		int dedupSeconds = 0,
 		int perMinute = 60,
 		string nickname = "test-host",
@@ -35,11 +36,14 @@ internal static class TestSupport
 		AppConfig config = new() { Nickname = nickname };
 		config.Notifications = new NotificationConfig
 		{
-			NotifyOnConnect = onConnect,
-			NotifyOnClose = onClose,
-			DedupPerIpSeconds = dedupSeconds,
-			MaxPerMinute = perMinute,
 			Telegram = new TelegramConfig { Enabled = enabled, BotToken = token, ChatId = chatId },
+			Filter = new FilterConfig
+			{
+				OnConnect = onConnect,
+				OnClose = onClose,
+				MinDurationSeconds = minDurationSeconds,
+			},
+			Throttle = new ThrottleConfig { PerIpSeconds = dedupSeconds, MaxPerMinute = perMinute },
 		};
 		return config;
 	}

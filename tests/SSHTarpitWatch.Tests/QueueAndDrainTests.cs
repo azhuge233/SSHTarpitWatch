@@ -29,7 +29,7 @@ public sealed class QueueAndDrainTests
 		}
 
 		// 队满 → 丢新 + 计数（过闸标记不回滚）
-		NotifyEnqueueResult overflow = pipeline.EnqueueConnect("10.0.0.3", 3, 2222, "");
+		ConnectEnqueueResult overflow = pipeline.EnqueueConnect("10.0.0.3", 3, 2222, "");
 		Assert.AreEqual(NotifyResult.SuppressedQueue, overflow.Result);
 		Assert.IsTrue(overflow.GatePassed);
 

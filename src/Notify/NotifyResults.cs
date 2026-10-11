@@ -15,6 +15,9 @@ internal enum NotifyResult
 	/// <summary>步 0：渠道或该 kind 开关关闭。</summary>
 	SuppressedSwitch,
 
+	/// <summary>步 0：时长闸（仅 close）——停留 &lt; 阈值；不写去重账本。</summary>
+	SuppressedDuration,
+
 	/// <summary>步 2：去重闸（每 IP 冷却）。</summary>
 	SuppressedDedup,
 
@@ -34,6 +37,7 @@ internal static class NotifyResults
 		NotifyResult.Sent => "sent",
 		NotifyResult.Failed => "failed",
 		NotifyResult.SuppressedSwitch => "suppressed_switch",
+		NotifyResult.SuppressedDuration => "suppressed_duration",
 		NotifyResult.SuppressedDedup => "suppressed_dedup",
 		NotifyResult.SuppressedRate => "suppressed_rate",
 		_ => "suppressed_queue",
@@ -49,6 +53,17 @@ internal static class NotifyResults
 /// <b>不因后续限速丢弃、队满或发送失败而回滚</b>（设计 §3.2 步 2）。
 /// </summary>
 internal readonly record struct NotifyEnqueueResult(NotifyResult Result, bool GatePassed);
+
+/// <summary>
+/// 连接事件的入队结果：除处置外带上连接期快照（设计 §3.1）——调用方随连接保留它，
+/// 断开时用它入队断开条（banner / 本地端口 / 连接时刻 / 当日 N / 过闸标记）。
+/// </summary>
+internal readonly record struct ConnectEnqueueResult(NotifyEnqueueResult Enqueue, ConnectionSnapshot Snapshot)
+{
+	public NotifyResult Result => Enqueue.Result;
+
+	public bool GatePassed => Enqueue.GatePassed;
+}
 
 /// <summary>
 /// 单次发送结果：失败以返回值表达（渠道异常不向调用方抛出，取消除外）。

@@ -149,6 +149,59 @@ public sealed class TarpitServerTests
 		Assert.IsTrue(firstOfB.Bytes.Length >= 5, "B 应收到合法的慢滴行");
 	}
 
+	[TestMethod]
+	public async Task Server_DefaultOnConnectOff_SendsOnlyOneMergedCloseNotification()
+	{
+		// 默认配置（filter.on_connect=false）：连接期不发通知，断开时收到唯一一条、含连接期全部信息（R3.2 / §3.3）
+		await using Harness harness = StartServer(delayMs: 1000, onConnect: false);
+		using Socket client = Connect(harness.Port);
+		SendAll(client, "SSH-2.0-default\n");
+		Frame first = await ReadFrameAsync(client, TimeSpan.FromSeconds(3), "首行");
+
+		client.Close();
+
+		await TestSupport.WaitUntilAsync(
+			() => harness.Notifier.Texts.Any(text => text.Contains("连接断开")), "断开通知送达");
+		await Task.Delay(50); // 给“误发的连接条”留出走漏窗口（若实现错误，连接条会先于此到达）
+
+		Assert.AreEqual(1, harness.Notifier.CallCount, "默认配置下一次连接只发一条通知");
+		string text = harness.Notifier.Texts[0];
+		StringAssert.Contains(text, "来源：127.0.0.1:");
+		StringAssert.Contains(text, $"→ 本机 :{harness.Port}");
+		StringAssert.Contains(text, "客户端：SSH-2.0-default");
+		StringAssert.Contains(text, "时间：");
+		StringAssert.Contains(text, "停留：");
+		StringAssert.Contains(text, "发出：");
+		StringAssert.Contains(text, "该 IP 今日第 1 次");
+		Assert.IsFalse(text.Contains("新连接", StringComparison.Ordinal), "默认不发连接条");
+		Assert.IsTrue(first.Bytes.Length >= 5, "慢滴行为不受影响");
+	}
+
+	[TestMethod]
+	public async Task Server_OnConnectTrue_SendsConnectThenMergedClose()
+	{
+		// on_connect=true：连接条模板不变（无停留/字节），断开条仍为合并模板（R3.3）
+		await using Harness harness = StartServer(delayMs: 1000, onConnect: true);
+		using Socket client = Connect(harness.Port);
+		SendAll(client, "SSH-2.0-two\n");
+
+		await TestSupport.WaitUntilAsync(
+			() => harness.Notifier.Texts.Any(text => text.Contains("新连接")), "连接条送达");
+		string connectText = harness.Notifier.Texts.First(text => text.Contains("新连接"));
+		StringAssert.Contains(connectText, "客户端：SSH-2.0-two");
+		Assert.IsFalse(connectText.Contains("停留：", StringComparison.Ordinal), "连接条模板不变（无停留/字节）");
+
+		client.Close();
+
+		await TestSupport.WaitUntilAsync(
+			() => harness.Notifier.Texts.Any(text => text.Contains("连接断开")), "断开条送达");
+		string closeText = harness.Notifier.Texts.First(text => text.Contains("连接断开"));
+		StringAssert.Contains(closeText, "客户端：SSH-2.0-two");
+		StringAssert.Contains(closeText, "停留：");
+		StringAssert.Contains(closeText, "发出：");
+		await TestSupport.WaitUntilAsync(() => harness.Notifier.CallCount >= 2, "连接条 + 断开条共两条");
+	}
+
 	// ---------- 测试底座 ----------
 
 	/// <summary>一帧（含尾部 CRLF）与读毕时刻（单调时钟）。</summary>
@@ -177,7 +230,7 @@ public sealed class TarpitServerTests
 
 		public TarpitServer Server { get; }
 
-		public int Port => Store.Current.Port;
+		public int Port => Store.Current.Server.Port;
 
 		public string LogText => log.Text;
 
@@ -195,13 +248,14 @@ public sealed class TarpitServerTests
 		}
 	}
 
-	private static Harness StartServer(int delayMs = fastDelayMs, int lineLength = 32, int maxClients = 8)
+	private static Harness StartServer(
+		int delayMs = fastDelayMs, int lineLength = 32, int maxClients = 8, bool onConnect = true)
 	{
-		AppConfig config = TestSupport.Notifications(dedupSeconds: 0, perMinute: 600);
-		config.Port = TestSupport.FreePort();
-		config.DelayMs = delayMs;
-		config.LineLength = lineLength;
-		config.MaxClients = maxClients;
+		AppConfig config = TestSupport.Notifications(dedupSeconds: 0, perMinute: 600, onConnect: onConnect);
+		config.Server.Port = TestSupport.FreePort();
+		config.Server.DelayMs = delayMs;
+		config.Server.LineLength = lineLength;
+		config.Server.MaxClients = maxClients;
 
 		ConsoleCapture log = new();
 		try

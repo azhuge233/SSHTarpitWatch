@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/cfg
-          printf '{"nickname":"ci-smoke","port":2222}\n' > /tmp/cfg/config.json
+          printf '{"nickname":"ci-smoke","server":{"port":2222}}\n' > /tmp/cfg/config.json
           chmod 644 /tmp/cfg/config.json
           docker run -d --name smoke \
             --read-only --tmpfs /tmp \

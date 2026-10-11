@@ -32,7 +32,7 @@ internal sealed class TarpitServer
 	{
 		this.configStore = configStore;
 		this.notify = notify;
-		gate = new CapacityGate(configStore.Current.MaxClients);
+		gate = new CapacityGate(configStore.Current.Server.MaxClients);
 	}
 
 	/// <summary>绑定并开始 accept；绑定失败抛异常（启动路径据此退出码 1）。</summary>
@@ -45,8 +45,8 @@ internal sealed class TarpitServer
 	/// <summary>热重载（设计 §4.3）：容量门控按新值调整；端口/地址族变了才重建监听。</summary>
 	public async Task ApplyReloadAsync(AppConfig next)
 	{
-		gate.Resize(next.MaxClients);
-		if (listener is null || (boundPort == next.Port && boundFamily == next.FamilyMode))
+		gate.Resize(next.Server.MaxClients);
+		if (listener is null || (boundPort == next.Server.Port && boundFamily == next.Server.FamilyMode))
 		{
 			return;
 		}
@@ -91,7 +91,7 @@ internal sealed class TarpitServer
 
 	private Socket CreateListener(AppConfig config)
 	{
-		(IPAddress address, bool dualMode) = ResolveBindAddress(config.FamilyMode);
+		(IPAddress address, bool dualMode) = ResolveBindAddress(config.Server.FamilyMode);
 		Socket socket = new(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 		if (address.AddressFamily == AddressFamily.InterNetworkV6)
 		{
@@ -99,11 +99,11 @@ internal sealed class TarpitServer
 		}
 
 		socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-		socket.Bind(new IPEndPoint(address, config.Port));
+		socket.Bind(new IPEndPoint(address, config.Server.Port));
 		socket.Listen(listenBacklog);
-		boundPort = config.Port;
-		boundFamily = config.FamilyMode;
-		Log.Info($"LISTEN family={config.BindFamily} port={config.Port} address={address}");
+		boundPort = config.Server.Port;
+		boundFamily = config.Server.FamilyMode;
+		Log.Info($"LISTEN family={config.Server.BindFamily} port={config.Server.Port} address={address}");
 		return socket;
 	}
 
@@ -125,7 +125,7 @@ internal sealed class TarpitServer
 
 	private async Task RebuildListenerAsync(AppConfig next)
 	{
-		Log.Info($"LISTEN rebuild port={boundPort} -> {next.Port} family={next.BindFamily}");
+		Log.Info($"LISTEN rebuild port={boundPort} -> {next.Server.Port} family={next.Server.BindFamily}");
 		CancellationTokenSource? oldCts = acceptCts;
 		Task? oldTask = acceptTask;
 		if (oldCts is not null)

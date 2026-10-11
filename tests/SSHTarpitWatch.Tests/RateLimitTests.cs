@@ -21,7 +21,7 @@ public sealed class RateLimitTests
 			Assert.AreEqual(NotifyResult.Queued, pipeline.EnqueueConnect($"10.0.0.{i}", 1000 + i, 2222, "").Result);
 		}
 
-		NotifyEnqueueResult exhausted = pipeline.EnqueueConnect("10.0.0.9", 1009, 2222, "");
+		ConnectEnqueueResult exhausted = pipeline.EnqueueConnect("10.0.0.9", 1009, 2222, "");
 		Assert.AreEqual(NotifyResult.SuppressedRate, exhausted.Result, "令牌耗尽");
 
 		// 连续补充：3/分钟 = 0.05/秒；20s 恰好补 1 个
@@ -53,10 +53,11 @@ public sealed class RateLimitTests
 		await using NotifyPipeline pipeline = new(
 			TestSupport.Store(TestSupport.Notifications(dedupSeconds: 0, perMinute: 2)), notifier, fake);
 
-		Assert.AreEqual(NotifyResult.Queued, pipeline.EnqueueConnect("1.0.0.1", 1000, 2222, "").Result);
-		Assert.AreEqual(NotifyResult.Queued, pipeline.EnqueueClose("1.0.0.1", 1000, 1.0, 16, true).Result);
+		ConnectEnqueueResult connect = pipeline.EnqueueConnect("1.0.0.1", 1000, 2222, "");
+		Assert.AreEqual(NotifyResult.Queued, connect.Result);
+		Assert.AreEqual(NotifyResult.Queued, pipeline.EnqueueClose(connect.Snapshot, 1.0, 16).Result);
 
-		NotifyEnqueueResult third = pipeline.EnqueueConnect("1.0.0.2", 1001, 2222, "");
+		ConnectEnqueueResult third = pipeline.EnqueueConnect("1.0.0.2", 1001, 2222, "");
 		Assert.AreEqual(NotifyResult.SuppressedRate, third.Result, "connect 与 close 共用同一只桶");
 	}
 }

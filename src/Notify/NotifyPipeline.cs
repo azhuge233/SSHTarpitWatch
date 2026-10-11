@@ -6,7 +6,7 @@ namespace SSHTarpitWatch.Notify;
 
 /// <summary>
 /// 通知管道（设计 §3.2，步骤 0..6 顺序固定）：
-/// 0 渠道/开关闸 → 1 当日计数 → 2 去重闸 → 3 全局限速 → 4 有界队列（1024，丢新）→ 5 单工作器发送 → 6 退出排空（≤5s）。
+/// 0 渠道/开关闸 + 时长闸 → 1 当日计数 → 2 去重闸 → 3 全局限速 → 4 有界队列（1024，丢新）→ 5 单工作器发送 → 6 退出排空（≤5s）。
 /// 入队即返回：主路径永不等待网络，通知链路故障绝不影响困住逻辑（§3.2 步 7 / N4）。
 /// </summary>
 internal sealed class NotifyPipeline : IAsyncDisposable
@@ -57,10 +57,12 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 	/// <summary>
 	/// 连接事件入队（设计 §2 步 5：首行读取结束/超时后触发）。
 	/// 步 1（当日计数）始终执行——被开关压制或去重丢弃的连接同样计入 N。
+	/// 返回的连接期快照（banner / 本地端口 / 连接时刻 / 当日 N / 过闸标记）由调用方随连接保留到断开（设计 §3.1/§3.4）。
 	/// </summary>
-	public NotifyEnqueueResult EnqueueConnect(string host, int port, int localPort, string banner)
+	public ConnectEnqueueResult EnqueueConnect(string host, int port, int localPort, string banner)
 	{
 		int todayCount = ledger.RegisterConnect(host, timeProvider.GetLocalNow());
+		DateTimeOffset nowUtc = timeProvider.GetUtcNow();
 		NotifyEvent evt = new()
 		{
 			Kind = NotifyEventKind.Connect,
@@ -68,28 +70,34 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 			Port = port,
 			LocalPort = localPort,
 			Banner = banner,
-			TimeUtc = timeProvider.GetUtcNow(),
+			TimeUtc = nowUtc,
+			ConnectTimeUtc = nowUtc,
 			TodayCount = todayCount,
 		};
-		return Process(evt, configStore.Current.Notifications);
+		NotifyEnqueueResult result = Process(evt, configStore.Current.Notifications);
+		ConnectionSnapshot snapshot = new(host, port, localPort, banner, nowUtc, todayCount, result.GatePassed);
+		return new ConnectEnqueueResult(result, snapshot);
 	}
 
 	/// <summary>
-	/// 断开事件入队（设计 §2 步 7 / §3.2）。
-	/// connectGatePassed = 本连接的 connect 是否过闸；notify_on_connect=false 时该值不参与判定。
+	/// 断开事件入队（设计 §2 步 7 / §3.2）：以连接期快照渲染合并模板（§3.3）——
+	/// 来源/本地端口/客户端/连接时刻/当日 N 取自快照；去重闸以断开判定时刻为「现在」。
 	/// </summary>
-	public NotifyEnqueueResult EnqueueClose(
-		string host, int port, double durationSeconds, long bytesSent, bool connectGatePassed)
+	public NotifyEnqueueResult EnqueueClose(ConnectionSnapshot snapshot, double durationSeconds, long bytesSent)
 	{
 		NotifyEvent evt = new()
 		{
 			Kind = NotifyEventKind.Close,
-			Host = host,
-			Port = port,
+			Host = snapshot.Host,
+			Port = snapshot.Port,
+			LocalPort = snapshot.LocalPort,
+			Banner = snapshot.Banner,
 			TimeUtc = timeProvider.GetUtcNow(),
+			ConnectTimeUtc = snapshot.ConnectTimeUtc,
+			TodayCount = snapshot.TodayCount,
+			ConnectGatePassed = snapshot.GatePassed,
 			DurationSeconds = durationSeconds,
 			BytesSent = bytesSent,
-			ConnectGatePassed = connectGatePassed,
 		};
 		return Process(evt, configStore.Current.Notifications);
 	}
@@ -116,6 +124,13 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 			return Suppress(evt, NotifyResult.SuppressedSwitch, gatePassed: false);
 		}
 
+		// 步 0：时长闸（仅 close，设计 §3.2 / R3.4）——停留 < 阈值 → 丢弃 + 计数；
+		// 不写去重账本（被过滤的连接不占用该 IP 冷却额度），本步先于步 2 的去重闸
+		if (IsBelowMinDuration(evt, notifications))
+		{
+			return Suppress(evt, NotifyResult.SuppressedDuration, gatePassed: false);
+		}
+
 		// 步 2：去重闸（通过即写账本）
 		if (!PassesDedup(evt, notifications))
 		{
@@ -123,7 +138,7 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 		}
 
 		// 步 3：全局限速（过闸标记不因限速丢弃回滚）
-		if (!rateLimit.TryConsume(notifications.MaxPerMinute))
+		if (!rateLimit.TryConsume(notifications.Throttle.MaxPerMinute))
 		{
 			return Suppress(evt, NotifyResult.SuppressedRate, gatePassed: true);
 		}
@@ -142,18 +157,24 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 	}
 
 	private static bool KindSwitchOn(NotifyEventKind kind, NotificationConfig notifications) =>
-		kind == NotifyEventKind.Connect ? notifications.NotifyOnConnect : notifications.NotifyOnClose;
+		kind == NotifyEventKind.Connect ? notifications.Filter.OnConnect : notifications.Filter.OnClose;
+
+	/// <summary>时长闸（设计 §3.2 步 0）：仅断开条；阈值 &gt; 0 且停留 &lt; 阈值 → 压制（≥ 语义：等于阈值要通知）。</summary>
+	private static bool IsBelowMinDuration(NotifyEvent evt, NotificationConfig notifications) =>
+		evt.Kind == NotifyEventKind.Close
+		&& notifications.Filter.MinDurationSeconds > 0
+		&& evt.DurationSeconds < notifications.Filter.MinDurationSeconds;
 
 	private bool PassesDedup(NotifyEvent evt, NotificationConfig notifications)
 	{
 		if (evt.Kind == NotifyEventKind.Connect)
 		{
-			return ledger.TryPassDedup(evt.Host, evt.TimeUtc, notifications.DedupPerIpSeconds);
+			return ledger.TryPassDedup(evt.Host, evt.TimeUtc, notifications.Throttle.PerIpSeconds);
 		}
 
-		if (notifications.NotifyOnConnect)
+		if (notifications.Filter.OnConnect)
 		{
-			// 断开条跟随其连接条（R3.5）：connect 未过闸 → 断开也不过闸；过闸则刷新账本
+			// 断开条跟随其连接条（R3.6）：connect 未过闸 → 断开也不过闸；过闸则刷新账本
 			if (!evt.ConnectGatePassed)
 			{
 				return false;
@@ -163,8 +184,8 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 			return true;
 		}
 
-		// notify_on_connect=false：按与 connect 相同的每 IP 冷却独立判定
-		return ledger.TryPassDedup(evt.Host, evt.TimeUtc, notifications.DedupPerIpSeconds);
+		// on_connect=false（默认）：按与 connect 相同的每 IP 冷却独立判定
+		return ledger.TryPassDedup(evt.Host, evt.TimeUtc, notifications.Throttle.PerIpSeconds);
 	}
 
 	private static NotifyEnqueueResult Suppress(NotifyEvent evt, NotifyResult result, bool gatePassed)
@@ -183,7 +204,7 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 		try
 		{
 			AppConfig config = configStore.Current;
-			ledger.Cleanup(timeProvider.GetUtcNow(), timeProvider.GetLocalNow(), config.Notifications.DedupPerIpSeconds);
+			ledger.Cleanup(timeProvider.GetUtcNow(), timeProvider.GetLocalNow(), config.Notifications.Throttle.PerIpSeconds);
 		}
 		catch (Exception ex)
 		{

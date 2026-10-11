@@ -19,6 +19,7 @@ public sealed class MessageTemplateTests
 			Banner = "SSH-2.0-libssh2_1.11.0",
 			TodayCount = 3,
 			TimeUtc = new DateTimeOffset(2026, 10, 6, 1, 2, 3, TimeSpan.Zero),
+			ConnectTimeUtc = new DateTimeOffset(2026, 10, 6, 1, 2, 3, TimeSpan.Zero),
 		};
 		DateTimeOffset local = new(2026, 10, 6, 9, 2, 3, TimeSpan.FromHours(8));
 		string text = NotifyMessage.Build(evt, "home-vps", local);
@@ -49,24 +50,56 @@ public sealed class MessageTemplateTests
 	}
 
 	[TestMethod]
-	public void Template_Close_DurationAndBytes()
+	public void Template_Close_MergedTemplate_ContainsAllConnectionFields()
+	{
+		// 断开条为合并模板（设计 §3.3）：来源→本机端口 / 客户端 / 时间=连接时刻 / 停留 / 字节 / 当日 N
+		NotifyEvent evt = new()
+		{
+			Kind = NotifyEventKind.Close,
+			Host = "198.51.100.9",
+			Port = 40000,
+			LocalPort = 2222,
+			Banner = "SSH-2.0-libssh2_1.11.0",
+			TodayCount = 3,
+			TimeUtc = new DateTimeOffset(2026, 10, 11, 1, 13, 0, TimeSpan.Zero),
+			ConnectTimeUtc = new DateTimeOffset(2026, 10, 11, 1, 12, 0, TimeSpan.Zero),
+			DurationSeconds = 3661.8,
+			BytesSent = 12345,
+		};
+		DateTimeOffset local = new(2026, 10, 11, 9, 12, 0, TimeSpan.FromHours(8));
+		string text = NotifyMessage.Build(evt, "box", local);
+
+		// 「时间」取连接建立时刻（09:12:00，而非断开的 09:13:00）
+		Assert.AreEqual(
+			"🕳 box · SSHTarpitWatch · 连接断开\n"
+			+ "来源：198.51.100.9:40000 → 本机 :2222\n"
+			+ "客户端：SSH-2.0-libssh2_1.11.0\n"
+			+ "时间：2026-10-11 09:12:00 (UTC+08:00)\n"
+			+ "停留：1 小时 1 分 1 秒\n"
+			+ "发出：12345 字节\n"
+			+ "该 IP 今日第 3 次",
+			text);
+	}
+
+	[TestMethod]
+	public void Template_Close_NoBanner_ShowsDash()
 	{
 		NotifyEvent evt = new()
 		{
 			Kind = NotifyEventKind.Close,
 			Host = "198.51.100.9",
 			Port = 40000,
-			DurationSeconds = 3661.8,
-			BytesSent = 12345,
+			LocalPort = 2222,
+			Banner = "",
+			TodayCount = 1,
+			DurationSeconds = 4.655,
+			BytesSent = 96,
 		};
 		string text = NotifyMessage.Build(evt, "box", TestSupport.Start);
 
-		Assert.AreEqual(
-			"🕳 box · SSHTarpitWatch · 连接断开\n"
-			+ "来源：198.51.100.9:40000\n"
-			+ "停留：1 小时 1 分 1 秒\n"
-			+ "发出：12345 字节",
-			text);
+		StringAssert.Contains(text, $"客户端：{NotifyMessage.NoBanner}");
+		StringAssert.Contains(text, "停留：0 小时 0 分 4 秒");
+		StringAssert.Contains(text, "发出：96 字节");
 	}
 
 	[TestMethod]

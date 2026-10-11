@@ -140,13 +140,6 @@ internal static class Program
 	/// <summary>SIGHUP 热重载（设计 §4.3）：失败保留旧配置、进程不退出；成功打印新配置。</summary>
 	private static async Task ReloadAsync(string configPath, ConfigStore store, TarpitServer server)
 	{
-		if (!File.Exists(configPath))
-		{
-			// 文件缺失按重载失败处理：静默回落到默认值会关掉通知、还可能改端口
-			Log.Error($"reload rejected: config file not found: {configPath} (keeping previous configuration)");
-			return;
-		}
-
 		ConfigLoadResult load = ConfigLoader.Load(configPath);
 		if (load.Errors.Count > 0)
 		{
@@ -154,8 +147,22 @@ internal static class Program
 			return;
 		}
 
+		if (load.FileMissing)
+		{
+			// 文件缺失按重载失败处理（设计 §4.3）：静默回落到默认值会关掉通知、还可能改端口。
+			// 判定放在 Load 之后（而非前置 File.Exists）——预检与读取之间文件消失的窗口同样被覆盖。
+			Log.Error($"reload rejected: config file not found: {configPath} (keeping previous configuration)");
+			return;
+		}
+
 		store.Replace(load.Config);
 		Log.Level = load.Config.Level;
+		foreach (string warning in load.Warnings)
+		{
+			// 重载成功也逐条提示警告（如双关 inert）——与启动路径同口径（设计 §4.1）
+			Log.Info($"CONFIG warning=\"{warning}\"");
+		}
+
 		await server.ApplyReloadAsync(load.Config).ConfigureAwait(false);
 		Log.Info($"RELOAD ok {Describe(load.Config)}");
 	}
@@ -168,12 +175,17 @@ internal static class Program
 		}
 	}
 
-	/// <summary>配置摘要（不含 bot_token，设计 §9）。</summary>
+	/// <summary>配置摘要（不含 bot_token，设计 §9；键名与 §4.2 的配置结构一致）。</summary>
 	private static string Describe(AppConfig config) => string.Create(
 		CultureInfo.InvariantCulture,
-		$"nickname=\"{config.Nickname}\" port={config.Port} bind_family={config.BindFamily} delay_ms={config.DelayMs} "
-		+ $"line_length={config.LineLength} max_clients={config.MaxClients} log_level={config.LogLevelName} "
-		+ $"telegram_enabled={config.Notifications.Telegram.Enabled} notify_on_connect={config.Notifications.NotifyOnConnect} "
-		+ $"notify_on_close={config.Notifications.NotifyOnClose} dedup_per_ip_seconds={config.Notifications.DedupPerIpSeconds} "
-		+ $"max_per_minute={config.Notifications.MaxPerMinute}");
+		$"nickname=\"{config.Nickname}\" log_level={config.LogLevelName} "
+		+ $"server.port={config.Server.Port} server.bind_family={config.Server.BindFamily} "
+		+ $"server.delay_ms={config.Server.DelayMs} server.line_length={config.Server.LineLength} "
+		+ $"server.max_clients={config.Server.MaxClients} "
+		+ $"telegram_enabled={config.Notifications.Telegram.Enabled} "
+		+ $"filter.on_connect={config.Notifications.Filter.OnConnect} "
+		+ $"filter.on_close={config.Notifications.Filter.OnClose} "
+		+ $"filter.min_duration_seconds={config.Notifications.Filter.MinDurationSeconds} "
+		+ $"throttle.per_ip_seconds={config.Notifications.Throttle.PerIpSeconds} "
+		+ $"throttle.max_per_minute={config.Notifications.Throttle.MaxPerMinute}");
 }
