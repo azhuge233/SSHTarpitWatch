@@ -150,7 +150,7 @@ internal sealed class GeoRegistry : IDisposable
 				return GeoLookupResult.Missing;
 			}
 
-			string country = "", code = "", region = "", city = "", isp = "";
+			string country = "", code = "", region = "", city = "", isp = "", asn = "";
 			List<string>? sources = null;
 			foreach (Entry entry in databases)
 			{
@@ -182,13 +182,14 @@ internal sealed class GeoRegistry : IDisposable
 				contributed |= Fill(ref region, result.Region);
 				contributed |= Fill(ref city, result.City);
 				contributed |= Fill(ref isp, result.Isp);
+				contributed |= Fill(ref asn, result.Asn);
 				if (contributed)
 				{
 					(sources ??= []).Add(result.Source);
 				}
 			}
 
-			GeoResult merged = new(country, code, region, city, isp, sources is null ? "" : string.Join("+", sources));
+			GeoResult merged = new(country, code, region, city, isp, asn, sources is null ? "" : string.Join("+", sources));
 			return merged.IsEmpty ? GeoLookupResult.NoRecord : GeoLookupResult.Found(merged);
 		}
 	}

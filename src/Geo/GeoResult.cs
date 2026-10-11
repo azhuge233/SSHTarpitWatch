@@ -3,12 +3,14 @@ namespace SSHTarpitWatch.Geo;
 /// <summary>
 /// 统一地区结果（设计 §3.6）：MMDB 与 xdb 两种库归一后的字段集合；空串 = 该库给不出该字段。
 /// 多库合并时逐字段取第一个非空值（库顺序 = 配置顺序 = 优先级）；Source 为贡献字段的库文件名（"+" 连接，诊断用）。
+/// ISP = 组织名、ASN = 裸数字字符串（如 "15169"；来源形如 AS15169 的在解码侧剥前缀）——名与号独立成字段，可跨库分别拼合。
 /// </summary>
-internal sealed record GeoResult(string Country, string CountryCode, string Region, string City, string Isp, string Source)
+internal sealed record GeoResult(
+	string Country, string CountryCode, string Region, string City, string Isp, string Asn, string Source)
 {
-	/// <summary>五个取值字段是否全空——全空视为「无查询结果」（设计 §3.6）。</summary>
+	/// <summary>六个取值字段是否全空——全空视为「无查询结果」（设计 §3.6）；只有 ISP/ASN 的结果同样算有结果。</summary>
 	public bool IsEmpty => Country.Length == 0 && CountryCode.Length == 0 && Region.Length == 0
-		&& City.Length == 0 && Isp.Length == 0;
+		&& City.Length == 0 && Isp.Length == 0 && Asn.Length == 0;
 
 	/// <summary>是否有任何地区字段（国家 / 国家码 / 省 / 市）——只有 ISP/ASN 的库不渲染地区行（测试用于断言该情形；渲染侧按同口径自行判断）。</summary>
 	public bool HasRegion => Country.Length > 0 || CountryCode.Length > 0 || Region.Length > 0 || City.Length > 0;

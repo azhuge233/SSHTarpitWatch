@@ -81,6 +81,43 @@ public sealed class GeoRegistryTests
 	}
 
 	[TestMethod]
+	public void Registry_AsnOnlyDatabase_CountsAsFound_AndMergesIspAsnAcrossDatabases()
+	{
+		// 只有号的库（GeoLite2-ASN 形态）：算「有结果」（Ok），不是 NoRecord
+		directory!.Write("asn.mmdb", GeoTestSupport.MmdbBytes("8.8.8.0/24", new Dictionary<string, object>
+		{
+			["autonomous_system_number"] = 15169u,
+		}));
+		using (GeoLookup numberOnly = new(TestSupport.Store(GeoTestSupport.ConfigWithGeoip("asn.mmdb")), directory.Root))
+		{
+			numberOnly.Open();
+			GeoLookupResult result = numberOnly.Lookup("8.8.8.8");
+			Assert.AreEqual(GeoStatus.Ok, result.Status, "只有 ASN 的库同样算查到结果");
+			Assert.AreEqual("15169", result.Result?.Asn);
+			Assert.AreEqual("", result.Result?.Isp, "只有号 → 组织名为空");
+		}
+
+		// 名与号跨库分别拼合（逐字段取首个非空）：号来自库 A、组织名与地区来自库 B
+		directory.Write("info.mmdb", GeoTestSupport.MmdbBytes("8.8.8.0/24", new Dictionary<string, object>
+		{
+			["country"] = "United States",
+			["country_code"] = "US",
+			["as_name"] = "Google LLC",
+		}));
+		using GeoLookup merged = new(
+			TestSupport.Store(GeoTestSupport.ConfigWithGeoip("asn.mmdb", "info.mmdb")), directory.Root);
+		merged.Open();
+		GeoLookupResult both = merged.Lookup("8.8.8.8");
+
+		Assert.AreEqual(GeoStatus.Ok, both.Status);
+		Assert.AreEqual("15169", both.Result?.Asn, "号来自库 A");
+		Assert.AreEqual("Google LLC", both.Result?.Isp, "组织名来自库 B");
+		Assert.AreEqual("United States", both.Result?.Country);
+		Assert.AreEqual("US", both.Result?.CountryCode);
+		Assert.AreEqual("asn.mmdb+info.mmdb", both.Result?.Source);
+	}
+
+	[TestMethod]
 	public void Registry_BrokenDatabase_DoesNotAffectOthers()
 	{
 		directory!.Write("good.mmdb", GeoTestSupport.MmdbBytes("1.0.0.0/8", MmdbFixture.Record(code: "CN")));

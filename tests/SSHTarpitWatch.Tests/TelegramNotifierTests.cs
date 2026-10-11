@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SSHTarpitWatch.Config;
 using SSHTarpitWatch.Notify;
@@ -25,6 +26,7 @@ public sealed class TelegramNotifierTests
 		Assert.AreEqual(1, handler.Requests.Count);
 		Assert.AreEqual("https://api.telegram.org/bot12345:ABC/sendMessage", handler.Requests[0].Url);
 		StringAssert.Contains(handler.Requests[0].Body, "\"chat_id\":\"42\"");
+		StringAssert.Contains(handler.Requests[0].Body, "\"parse_mode\":\"HTML\"");
 		StringAssert.Contains(handler.Requests[0].Body, "hello");
 	}
 
@@ -97,6 +99,84 @@ public sealed class TelegramNotifierTests
 		Assert.IsFalse(result.Success);
 		Assert.IsNull(result.RetryAfter, "非 429 无 retry_after");
 		StringAssert.Contains(result.Error, "400");
+	}
+
+	[TestMethod]
+	public async Task Telegram_HtmlEntityRejection_ResendsAsPlainText()
+	{
+		// 设计 §3.3 兜底：实体 / 解析类 400 → 去标记 + 反转义、不带 parse_mode 重发一次
+		int calls = 0;
+		RecordingHandler handler = new()
+		{
+			Responder = _ => ++calls == 1
+				? new HttpResponseMessage(HttpStatusCode.BadRequest)
+				{
+					Content = new StringContent(
+						"{\"ok\":false,\"error_code\":400,\"description\":"
+						+ "\"Bad Request: can't parse entities: unsupported start tag at byte offset 3\"}",
+						Encoding.UTF8,
+						"application/json"),
+				}
+				: new HttpResponseMessage(HttpStatusCode.OK),
+		};
+		using TelegramNotifier notifier = new(handler: handler);
+
+		string text = "客户端：SSH-2.0-&lt;b&gt; &amp; (<code>AS15169</code>)";
+		NotifySendResult result = await notifier.SendAsync(text, Config(), CancellationToken.None);
+
+		Assert.IsTrue(result.Success, "降级重发成功");
+		Assert.AreEqual(2, handler.Requests.Count, "只重发一次");
+		using JsonDocument first = JsonDocument.Parse(handler.Requests[0].Body);
+		Assert.AreEqual("HTML", first.RootElement.GetProperty("parse_mode").GetString(), "首次按 HTML 发送");
+		Assert.AreEqual(text, first.RootElement.GetProperty("text").GetString());
+		using JsonDocument second = JsonDocument.Parse(handler.Requests[1].Body);
+		Assert.IsFalse(second.RootElement.TryGetProperty("parse_mode", out _), "重发不带 parse_mode");
+		Assert.AreEqual(
+			"客户端：SSH-2.0-<b> & (AS15169)",
+			second.RootElement.GetProperty("text").GetString(),
+			"去标记 + 反转义");
+	}
+
+	[TestMethod]
+	public async Task Telegram_HtmlEntityRejection_FallbackFailure_IsReported()
+	{
+		// 重发仍失败 → 走原失败路径（失败返回值交回管道；不再发第三次）
+		RecordingHandler handler = new()
+		{
+			Responder = _ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+			{
+				Content = new StringContent(
+					"{\"ok\":false,\"error_code\":400,\"description\":\"Bad Request: can't parse entities\"}"),
+			},
+		};
+		using TelegramNotifier notifier = new(handler: handler);
+
+		NotifySendResult result = await notifier.SendAsync("x <code>AS1</code>", Config(), CancellationToken.None);
+
+		Assert.IsFalse(result.Success);
+		Assert.AreEqual(2, handler.Requests.Count, "降级重发只做一次");
+		StringAssert.Contains(result.Error, "400");
+	}
+
+	[TestMethod]
+	public async Task Telegram_BadRequest_NotParseRelated_NoResend()
+	{
+		// 400 但非实体 / 解析类（如 chat not found）→ 不降级重发
+		RecordingHandler handler = new()
+		{
+			Responder = _ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+			{
+				Content = new StringContent(
+					"{\"ok\":false,\"error_code\":400,\"description\":\"Bad Request: chat not found\"}"),
+			},
+		};
+		using TelegramNotifier notifier = new(handler: handler);
+
+		NotifySendResult result = await notifier.SendAsync("x", Config(), CancellationToken.None);
+
+		Assert.IsFalse(result.Success);
+		Assert.AreEqual(1, handler.Requests.Count, "非实体 / 解析类不重发");
+		StringAssert.Contains(result.Error, "chat not found");
 	}
 
 	[TestMethod]

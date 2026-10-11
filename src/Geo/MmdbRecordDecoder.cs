@@ -7,9 +7,11 @@ namespace SSHTarpitWatch.Geo;
 /// MMDB 数据记录提取（schema 导向，设计 §3.6）：只认用到的顶层键，其余一律跳过（不递归未知值、不解引用未知指针）。
 /// 地区字段：country.iso_code / country.names[language]（MaxMind 系嵌套 map）、subdivisions[0].names[language]、
 /// city.names[language]；IPinfo Lite 的扁平形态另取顶层 country_code（国家码）与 country 字符串（国家名）。
-/// ISP 覆盖三种形态（组织名按序取首个非空）：traits.autonomous_system_organization（City 系）、
-/// 顶层 autonomous_system_organization（GeoLite2-ASN 系）、顶层 as_name（IPinfo Lite，缺 as_name 时退化用 asn 字符串）；
-/// 只有 ASN 号时退化为 AS{号}。键名按原样匹配（MMDB 键恒为小写）。记录为空 map（或字段全空）返回 null = 该 IP 无可用结果。
+/// ISP = 组织名（按序取首个非空）：traits.autonomous_system_organization（City 系）、
+/// 顶层 autonomous_system_organization（GeoLite2-ASN 系）、顶层 as_name（IPinfo Lite）；
+/// ASN 独立成 Asn 字段（裸数字，设计 §3.6）：traits.autonomous_system_number → 顶层 autonomous_system_number →
+/// asn（IPinfo，形如 AS15169）**取首个数字段**去前导零存裸数字（多号文本只取第一个，绝不拼接）——名与号互不影响，只有号同样出结果。
+/// 键名按原样匹配（MMDB 键恒为小写）。记录为空 map（或字段全空）返回 null = 该 IP 无可用结果。
 /// </summary>
 internal static class MmdbRecordDecoder
 {
@@ -69,13 +71,11 @@ internal static class MmdbRecordDecoder
 		string isp = traitsOrganization.Length > 0 ? traitsOrganization
 			: topOrganization.Length > 0 ? topOrganization
 			: infoOrganization;
-		if (isp.Length == 0)
-		{
-			ulong number = traitsNumber > 0 ? traitsNumber : topNumber;
-			isp = number > 0 ? string.Concat("AS", number.ToString(CultureInfo.InvariantCulture)) : infoAsn;
-		}
+		string asn = traitsNumber > 0 ? FormatNumber(traitsNumber)
+			: topNumber > 0 ? FormatNumber(topNumber)
+			: NormalizeAsn(infoAsn);
 
-		GeoResult result = new(country, code, region, city, isp, source);
+		GeoResult result = new(country, code, region, city, isp, asn, source);
 		return result.IsEmpty ? null : result;
 	}
 
@@ -277,6 +277,48 @@ internal static class MmdbRecordDecoder
 		}
 
 		return next;
+	}
+
+	/// <summary>ASN 号（u16/u32/u64）→ 裸数字字符串（Asn 字段口径）。</summary>
+	private static string FormatNumber(ulong number) => number.ToString(CultureInfo.InvariantCulture);
+
+	/// <summary>
+	/// 形如 AS15169 的 ASN 文本 → 裸数字（Asn 字段恒为裸数字）：取**首个数字段**并去前导零——
+	/// 多号文本（IPinfo 对多归属网络可能给出 `AS64513 AS64513` 之类）只取第一个，**绝不拼接**（拼接会造出假号）；
+	/// 无数字或仅 0 → 空串（该字段视为无值，与数字路径的 `number &gt; 0` 同口径）。
+	/// </summary>
+	private static string NormalizeAsn(string text)
+	{
+		int start = -1;
+		int end = -1;
+		for (int i = 0; i < text.Length; i++)
+		{
+			if (char.IsAsciiDigit(text[i]))
+			{
+				if (start < 0)
+				{
+					start = i;
+				}
+
+				end = i + 1;
+			}
+			else if (start >= 0)
+			{
+				break;
+			}
+		}
+
+		if (start < 0)
+		{
+			return "";
+		}
+
+		while (start < end - 1 && text[start] == '0')
+		{
+			start++;
+		}
+
+		return text[start] == '0' && end - start == 1 ? "" : text[start..end];
 	}
 
 	/// <summary>读一个组织名 / ASN 文本（均恒为字符串）；非字符串忽略。</summary>

@@ -39,6 +39,7 @@ public sealed class MmdbReaderTests
 		Assert.AreEqual("广东省", result.Region);
 		Assert.AreEqual("深圳市", result.City);
 		Assert.AreEqual("Chinanet", result.Isp);
+		Assert.AreEqual("4134", result.Asn, "traits.autonomous_system_number → 裸数字（名与号独立成字段）");
 		Assert.AreEqual("test.mmdb", result.Source);
 		Assert.AreEqual("mmdb", reader.Kind);
 	}
@@ -121,7 +122,7 @@ public sealed class MmdbReaderTests
 	}
 
 	[TestMethod]
-	public void Mmdb_TopLevelAsnRecord_IspForms()
+	public void Mmdb_TopLevelAsnRecord_IspAndAsnSeparated()
 	{
 		// GeoLite2-ASN 系：顶层 autonomous_system_number / autonomous_system_organization（无 country / city / traits）
 		MmdbFixture fixture = new();
@@ -138,11 +139,15 @@ public sealed class MmdbReaderTests
 
 		GeoResult? full = reader.Lookup(IPAddress.Parse("8.8.8.8"), "en");
 		Assert.IsNotNull(full, "只有 ISP/ASN 字段同样算查到结果");
-		Assert.AreEqual("Google LLC", full.Isp, "顶层 autonomous_system_organization");
+		Assert.AreEqual("Google LLC", full.Isp, "顶层 autonomous_system_organization → 组织名");
+		Assert.AreEqual("15169", full.Asn, "顶层 autonomous_system_number → 裸数字（不再拼进 Isp）");
 		Assert.AreEqual("", full.Country);
 		Assert.IsFalse(full.HasRegion, "ASN 库不提供地区字段");
 
-		Assert.AreEqual("AS3356", reader.Lookup(IPAddress.Parse("9.9.9.9"), "en")?.Isp, "只有 ASN 号 → 退化为 AS{号}");
+		GeoResult? numberOnly = reader.Lookup(IPAddress.Parse("9.9.9.9"), "en");
+		Assert.IsNotNull(numberOnly, "只有 ASN 号 → 仍算查到结果（Asn 计入 IsEmpty）");
+		Assert.AreEqual("", numberOnly.Isp, "只有号 → Isp 为空（号独立成 Asn 字段）");
+		Assert.AreEqual("3356", numberOnly.Asn);
 	}
 
 	[TestMethod]
@@ -169,10 +174,30 @@ public sealed class MmdbReaderTests
 
 		GeoResult? named = reader.Lookup(IPAddress.Parse("8.8.8.8"), "en");
 		Assert.AreEqual("Google LLC", named?.Isp, "as_name 即组织名（与地区字段同记录共存）");
+		Assert.AreEqual("15169", named?.Asn, "asn 字符串 AS15169 → 取首个数字段存裸数字");
 		Assert.AreEqual("United States", named?.Country);
 		Assert.AreEqual("US", named?.CountryCode);
 
-		Assert.AreEqual("AS13335", reader.Lookup(IPAddress.Parse("1.1.1.1"), "en")?.Isp, "缺 as_name → 退化用 asn 字符串");
+		GeoResult? numberOnly = reader.Lookup(IPAddress.Parse("1.1.1.1"), "en");
+		Assert.AreEqual("", numberOnly?.Isp, "缺 as_name → Isp 为空（号独立成 Asn 字段）");
+		Assert.AreEqual("13335", numberOnly?.Asn);
+	}
+
+	[TestMethod]
+	public void Mmdb_AsnText_MultiNumberAndEdgeShapes()
+	{
+		// Asn 文本形态（评审发现加固）：多号文本只取**第一个**数字段，绝不拼接（拼接会造出假号）；去前导零；仅 0 视为无值
+		MmdbFixture fixture = new();
+		fixture.Add("7.7.7.0/24", new Dictionary<string, object> { ["asn"] = "AS64513 AS64513" });
+		fixture.Add("8.8.4.0/24", new Dictionary<string, object> { ["asn"] = "AS015169" });
+		fixture.Add("9.9.9.0/24", new Dictionary<string, object> { ["country_code"] = "US", ["asn"] = "AS0" });
+		fixture.Add("5.5.5.0/24", new Dictionary<string, object> { ["country_code"] = "US", ["asn"] = "AS" });
+		using IGeoDatabaseReader reader = Open(fixture);
+
+		Assert.AreEqual("64513", reader.Lookup(IPAddress.Parse("7.7.7.7"), "en")?.Asn, "多号文本 → 只取第一个（绝不拼接成 6451364513）");
+		Assert.AreEqual("15169", reader.Lookup(IPAddress.Parse("8.8.4.4"), "en")?.Asn, "前导零去除");
+		Assert.AreEqual("", reader.Lookup(IPAddress.Parse("9.9.9.9"), "en")?.Asn, "仅 0 → 视为无值（与数字路径 number > 0 同口径）");
+		Assert.AreEqual("", reader.Lookup(IPAddress.Parse("5.5.5.5"), "en")?.Asn, "无数字 → 无值");
 	}
 
 	[TestMethod]

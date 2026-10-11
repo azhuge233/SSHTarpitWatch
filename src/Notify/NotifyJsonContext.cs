@@ -12,7 +12,7 @@ internal sealed partial class NotifyJsonContext : JsonSerializerContext
 {
 }
 
-/// <summary>sendMessage 请求体（设计 §3.2 步 5）。</summary>
+/// <summary>sendMessage 请求体（设计 §3.2 步 5 / §3.3）。</summary>
 internal sealed class TelegramSendMessage
 {
 	[JsonPropertyName("chat_id")]
@@ -20,6 +20,11 @@ internal sealed class TelegramSendMessage
 
 	[JsonPropertyName("text")]
 	public string Text { get; set; } = "";
+
+	/// <summary>parse_mode：恒为 HTML（设计 §3.3，不加配置键）；拒收降级重发时置 null（不出现在 JSON 里）。</summary>
+	[JsonPropertyName("parse_mode")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? ParseMode { get; set; }
 }
 
 /// <summary>Telegram API 响应：失败时用于提取 description 与 retry_after。</summary>

@@ -114,6 +114,6 @@ internal sealed class GeoLookup : IDisposable
 	/// <summary>查询结果的 debug 摘要（排障用）。</summary>
 	private static string Summarize(GeoLookupResult result) => result.Result is GeoResult found
 		? $"country={found.Country} code={found.CountryCode} region={found.Region} city={found.City} "
-			+ $"isp={found.Isp} source={found.Source}"
+			+ $"isp={found.Isp} asn={found.Asn} source={found.Source}"
 		: "-";
 }

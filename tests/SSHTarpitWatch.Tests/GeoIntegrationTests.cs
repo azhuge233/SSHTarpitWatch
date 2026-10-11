@@ -31,15 +31,17 @@ public sealed class GeoIntegrationTests
 		using ConsoleCapture log = new();
 		await using Harness harness = new(config, directory.Root, log);
 		using Socket client = Connect(harness.Port);
-		SendAll(client, "SSH-2.0-geo\n");
+		SendAll(client, "SSH-2.0-<b>&geo\n");
 		client.Close();
 
 		await TestSupport.WaitUntilAsync(
 			() => harness.Notifier.Texts.Any(text => text.Contains("连接断开", StringComparison.Ordinal)), "断开通知送达");
 		string text = harness.Notifier.Texts.First(item => item.Contains("连接断开", StringComparison.Ordinal));
 
+		StringAssert.Contains(text, "客户端：SSH-2.0-&lt;b&gt;&amp;geo", "banner 里的标记字样被转义（HTML 模式防注入）");
 		StringAssert.Contains(text, "地区：中国 · 广东省 · 深圳市 (CN)");
-		StringAssert.Contains(text, "ISP：Chinanet");
+		StringAssert.Contains(text, "ISP：Chinanet (<code>AS4134</code>)");
+		StringAssert.Contains(text, "\n#中国 #CN #广东省 #深圳市 #AS4134 #Chinanet");
 		Assert.AreEqual(1, harness.Geo.OpenCount, "夹具库应被打开");
 	}
 

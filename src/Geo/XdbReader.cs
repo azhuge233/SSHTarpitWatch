@@ -211,7 +211,8 @@ internal sealed class XdbReader : IGeoDatabaseReader
 	private GeoResult? ParseRecord(string text)
 	{
 		string[] fields = text.Trim().Split('|');
-		GeoResult result = new(Field(fields, 0), Field(fields, 4), Field(fields, 1), Field(fields, 2), Field(fields, 3), source);
+		// xdb 记录没有 ASN 字段（Asn 恒空——号只来自 MMDB 系库，跨库合并时由其他库补上）
+		GeoResult result = new(Field(fields, 0), Field(fields, 4), Field(fields, 1), Field(fields, 2), Field(fields, 3), "", source);
 		return result.IsEmpty ? null : result;
 	}
 
