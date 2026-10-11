@@ -6,7 +6,7 @@ namespace SSHTarpitWatch.Tests;
 /// <summary>
 /// 配置加载与校验（设计 §4.1 / §4.2 / §7）：全部默认值、宽松 JSON（注释与尾逗号）、
 /// 文件缺失 / 非法 JSON / 空文档行为、校验矩阵（非法值各报对应错 + 组合多条）、
-/// 严格键校验（旧键迁移提示 / 未知键报错）、嵌套段缺省值、双关警告。
+/// 严格键校验（未知键报错）、嵌套段缺省值、双关警告。
 /// 临时配置文件一律落 <see cref="Path.GetTempPath"/>，[TestCleanup] 清理不遗留。
 /// </summary>
 [TestClass]
@@ -129,26 +129,6 @@ public sealed class ConfigLoaderTests
 	}
 
 	[TestMethod]
-	[DataRow("""{"port": 2222}""", "port", "server.port")]
-	[DataRow("""{"bind_family": "ipv4"}""", "bind_family", "server.bind_family")]
-	[DataRow("""{"delay_ms": 100}""", "delay_ms", "server.delay_ms")]
-	[DataRow("""{"line_length": 64}""", "line_length", "server.line_length")]
-	[DataRow("""{"max_clients": 8}""", "max_clients", "server.max_clients")]
-	[DataRow("""{"notifications": {"notify_on_connect": true}}""", "notifications.notify_on_connect", "notifications.filter.on_connect")]
-	[DataRow("""{"notifications": {"notify_on_close": false}}""", "notifications.notify_on_close", "notifications.filter.on_close")]
-	[DataRow("""{"notifications": {"dedup_per_ip_seconds": 60}}""", "notifications.dedup_per_ip_seconds", "notifications.throttle.per_ip_seconds")]
-	[DataRow("""{"notifications": {"max_per_minute": 10}}""", "notifications.max_per_minute", "notifications.throttle.max_per_minute")]
-	public void Load_LegacyKeys_ErrorWithMigrationHint(string json, string oldKey, string newKey)
-	{
-		ConfigLoadResult result = ConfigLoader.Load(WriteTemp(json));
-
-		Assert.AreEqual(1, result.Errors.Count, $"旧键 {oldKey} 应恰好报一条错误：{string.Join(" | ", result.Errors)}");
-		StringAssert.Contains(result.Errors[0], oldKey, "报错应点名旧键");
-		StringAssert.Contains(result.Errors[0], newKey, $"报错应提示新键 {newKey}");
-		StringAssert.Contains(result.Errors[0], "请更新配置", "报错应给迁移提示");
-	}
-
-	[TestMethod]
 	[DataRow("""{"por": 1}""", "por")]
 	[DataRow("""{"server": {"ports": 1}}""", "server.ports")]
 	[DataRow("""{"notifications": {"filter": {"min_duration": 5}}}""", "notifications.filter.min_duration")]
@@ -162,19 +142,58 @@ public sealed class ConfigLoaderTests
 	}
 
 	[TestMethod]
-	public void Load_LegacyAndUnknownKeys_BothReportedPerKey()
+	public void Load_MultipleUnknownKeys_ReportedPerKey()
 	{
-		// 逐条报错：旧键与未知键在同一份配置里各报各的
+		// 逐条报错：同一份配置里的多个未知键各报各的（不静默忽略）——旧布局的键也按未知键报
 		ConfigLoadResult result = ConfigLoader.Load(WriteTemp(
 			"""{"port": 2222, "typo_key": 1, "notifications": {"dedup_per_ip_seconds": 60, "bogus": true}}"""));
 
 		Assert.AreEqual(4, result.Errors.Count, $"应逐条报 4 条：{string.Join(" | ", result.Errors)}");
-		Assert.IsTrue(result.Errors.Any(error => error.Contains("port") && error.Contains("server.port")), "旧键 port");
-		Assert.IsTrue(result.Errors.Any(error => error.Contains("typo_key")), "未知顶层键");
-		Assert.IsTrue(
-			result.Errors.Any(error => error.Contains("dedup_per_ip_seconds") && error.Contains("throttle.per_ip_seconds")),
-			"旧键 dedup_per_ip_seconds");
-		Assert.IsTrue(result.Errors.Any(error => error.Contains("notifications.bogus")), "未知嵌套键");
+		Assert.IsTrue(result.Errors.Any(error => error.Contains("port")), "旧布局的顶层键");
+		Assert.IsTrue(result.Errors.Any(error => error.Contains("typo_key")), "拼错的顶层键");
+		Assert.IsTrue(result.Errors.Any(error => error.Contains("dedup_per_ip_seconds")), "旧布局的嵌套键");
+		Assert.IsTrue(result.Errors.Any(error => error.Contains("notifications.bogus")), "拼错的嵌套键");
+	}
+
+	[TestMethod]
+	public void KeyValidator_AllowedKeys_MatchConfigModel()
+	{
+		// 防漂移（评审建议）：允许键集合是模型 [JsonPropertyName] 的手工副本——双向断言，
+		// 新增/改名配置键而忘记同步校验器时此用例即红（漏同步要么让合法键被误判，要么让拼错的键静默滑过）。
+		Dictionary<string, Type> scopeTypes = new(StringComparer.Ordinal)
+		{
+			["Root"] = typeof(AppConfig),
+			["Server"] = typeof(ServerConfig),
+			["Notifications"] = typeof(NotificationConfig),
+			["Telegram"] = typeof(TelegramConfig),
+			["Filter"] = typeof(FilterConfig),
+			["Throttle"] = typeof(ThrottleConfig),
+			["Geoip"] = typeof(GeoIpConfig),
+		};
+
+		Assert.AreEqual(
+			scopeTypes.Count,
+			ConfigKeyValidator.allowedKeys.Count,
+			"作用域数量不一致：新增/删除作用域时请同步本用例的类型映射与校验器");
+
+		foreach ((ConfigKeyValidator.KeyScope scope, HashSet<string> allowed) in ConfigKeyValidator.allowedKeys)
+		{
+			Assert.IsTrue(
+				scopeTypes.TryGetValue(scope.ToString(), out Type? model),
+				$"未知作用域 {scope}——请在本用例补类型映射");
+			HashSet<string> modelKeys = model
+				.GetProperties()
+				.Select(property => System.Reflection.CustomAttributeExtensions
+					.GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>(property)?.Name)
+				.Where(name => name is not null)
+				.Select(name => name!)
+				.ToHashSet(StringComparer.Ordinal);
+
+			CollectionAssert.AreEquivalent(
+				modelKeys.ToArray(),
+				allowed.ToArray(),
+				$"作用域 {scope} 的允许键与 {model.Name} 的 [JsonPropertyName] 不一致——两侧必须逐键对应");
+		}
 	}
 
 	[TestMethod]

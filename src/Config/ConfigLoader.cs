@@ -12,7 +12,7 @@ internal sealed record ConfigLoadResult(AppConfig Config, IReadOnlyList<string> 
 /// <summary>
 /// 配置加载与校验（设计 §4.1）：默认路径由 CLI 层给出（= 二进制所在目录的 config.json），--config 覆盖；
 /// 文件缺失用默认值 + 警告；不可读（权限等）报错——不静默回落；
-/// 解析失败、键名错误（旧键名/未知键）与取值校验失败一律报错（退出码 1）。
+/// 解析失败与键名错误（未知键）与取值校验失败一律报错（退出码 1）。
 /// </summary>
 internal static class ConfigLoader
 {

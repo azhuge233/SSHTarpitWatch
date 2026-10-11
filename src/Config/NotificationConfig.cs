@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace SSHTarpitWatch.Config;
 
 /// <summary>
-/// 通知配置（设计 §4.2 的 notifications 段）：telegram（渠道）/ filter（开关与时长闸）/ throttle（去重与限速）。
+/// 通知配置（设计 §4.2 的 notifications 段）：telegram（渠道）/ filter（开关与时长闸）/ throttle（去重与限速）/ geoip（地区解析）。
 /// 全部键带默认值：段缺失或键缺失时按默认值运行。
 /// 注意：Validate 之前必须先 Normalize——JSON 里显式写 null 会把非空属性置空。
 /// </summary>
