@@ -337,4 +337,43 @@ public sealed class ConfigLoaderTests
 		Assert.AreEqual(1, result.Warnings.Count, "保留原有警告语义");
 		Assert.IsFalse(result.Warnings[0].Contains("inert", StringComparison.Ordinal), "缺失警告与双关警告是两回事");
 	}
+
+	/// <summary>开了地区解析却没配库 → 警告但不报错（避免通知里静默持续显示「库缺失」；重载同口径）。</summary>
+	[TestMethod]
+	public void Load_GeoipEnabledWithoutDatabases_Warns()
+	{
+		ConfigLoadResult result = ConfigLoader.Load(WriteTemp(
+			"""{"notifications": {"geoip": {"enabled": true, "databases": []}}}"""));
+
+		Assert.AreEqual(0, result.Errors.Count, "缺库不是配置错误（运行期降级为「库缺失」）");
+		Assert.AreEqual(1, result.Warnings.Count);
+		StringAssert.Contains(result.Warnings[0], "no databases configured");
+	}
+
+	/// <summary>发布件出厂示例必须能被加载器解析、且键名全部合法——它被 README 指示 `cp` 成 config.json 直接使用。
+	/// 唯一允许的报错是刻意保留的凭据闸（fail-loud，防“静默不通知”）。</summary>
+	[TestMethod]
+	public void ShippedExampleConfig_LoadsWithKeyCleanJson()
+	{
+		string path = FindRepoFile("config/config.example.json");
+		ConfigLoadResult result = ConfigLoader.Load(path);
+
+		Assert.IsTrue(result.Errors.Count <= 1, string.Join(" | ", result.Errors));
+		Assert.IsTrue(
+			result.Errors.All(e => e.Contains("bot_token", StringComparison.Ordinal)),
+			$"出厂示例只允许凭据闸报错，实际: {string.Join(" | ", result.Errors)}");
+	}
+
+	/// <summary>从测试输出目录向上找到仓库根（以 SSHTarpitWatch.slnx 为锚）。</summary>
+	private static string FindRepoFile(string relative)
+	{
+		DirectoryInfo? dir = new(AppContext.BaseDirectory);
+		while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "SSHTarpitWatch.slnx")))
+		{
+			dir = dir.Parent;
+		}
+
+		Assert.IsNotNull(dir, "找不到仓库根（SSHTarpitWatch.slnx）");
+		return Path.GetFullPath(Path.Combine(dir.FullName, relative));
+	}
 }

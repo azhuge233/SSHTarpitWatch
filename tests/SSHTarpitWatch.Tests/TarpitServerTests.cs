@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SSHTarpitWatch.Config;
+using SSHTarpitWatch.Geo;
 using SSHTarpitWatch.Notify;
 using SSHTarpitWatch.Tarpit;
 
@@ -207,7 +208,7 @@ public sealed class TarpitServerTests
 	/// <summary>一帧（含尾部 CRLF）与读毕时刻（单调时钟）。</summary>
 	private readonly record struct Frame(byte[] Bytes, long Ticks);
 
-	/// <summary>进程内真实服务（真实端口 + FakeNotifier 渠道），连同 stdout 捕获一起收尾。</summary>
+	/// <summary>进程内真实服务（真实端口 + FakeNotifier 渠道 + 地区查询门面），连同 stdout 捕获一起收尾。</summary>
 	private sealed class Harness : IAsyncDisposable
 	{
 		private readonly ConsoleCapture log;
@@ -218,7 +219,9 @@ public sealed class TarpitServerTests
 			Store = TestSupport.Store(config);
 			Notifier = new FakeNotifier();
 			Pipeline = new NotifyPipeline(Store, Notifier);
-			Server = new TarpitServer(Store, Pipeline);
+			Geo = new GeoLookup(Store, AppContext.BaseDirectory);
+			Geo.Open();
+			Server = new TarpitServer(Store, Pipeline, Geo);
 			Server.Start();
 		}
 
@@ -227,6 +230,8 @@ public sealed class TarpitServerTests
 		public FakeNotifier Notifier { get; }
 
 		public NotifyPipeline Pipeline { get; }
+
+		public GeoLookup Geo { get; }
 
 		public TarpitServer Server { get; }
 
@@ -243,6 +248,7 @@ public sealed class TarpitServerTests
 			}
 			finally
 			{
+				Geo.Dispose();
 				log.Dispose();
 			}
 		}

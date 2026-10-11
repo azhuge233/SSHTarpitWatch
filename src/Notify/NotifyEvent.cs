@@ -1,3 +1,5 @@
+using SSHTarpitWatch.Geo;
+
 namespace SSHTarpitWatch.Notify;
 
 /// <summary>通知事件类型（设计 §3.1）。</summary>
@@ -43,4 +45,10 @@ internal sealed class NotifyEvent
 
 	/// <summary>本连接的 connect 是否通过去重闸（close 事件用；设计 §3.2 步 2）。</summary>
 	public bool ConnectGatePassed { get; init; }
+
+	/// <summary>
+	/// 地区查询结果（连接期快照：连接时异步查库的结果随快照到断开时刻，设计 §3.1 / §3.6）。
+	/// 默认值 = 未启用（NoDatabase）→ 消息里不渲染地区行（与 GeoIP 落地前的行为一致）。
+	/// </summary>
+	public GeoLookupResult Geo { get; init; }
 }

@@ -18,13 +18,18 @@ internal sealed class NotificationConfig
 	[JsonPropertyName("throttle")]
 	public ThrottleConfig Throttle { get; set; } = new();
 
+	[JsonPropertyName("geoip")]
+	public GeoIpConfig Geoip { get; set; } = new();
+
 	/// <summary>JSON null 兜底（源生成直接赋值，可能把声明为非空的属性置 null）。</summary>
 	public void Normalize()
 	{
 		Telegram ??= new TelegramConfig();
 		Filter ??= new FilterConfig();
 		Throttle ??= new ThrottleConfig();
+		Geoip ??= new GeoIpConfig();
 		Telegram.Normalize();
+		Geoip.Normalize();
 	}
 
 	/// <summary>校验矩阵（设计 §4.2）；错误追加进 <paramref name="errors"/>。</summary>
@@ -33,6 +38,7 @@ internal sealed class NotificationConfig
 		Telegram.Validate(errors);
 		Filter.Validate(errors);
 		Throttle.Validate(errors);
+		Geoip.Validate(errors);
 	}
 }
 
@@ -86,6 +92,41 @@ internal sealed class FilterConfig
 		if (MinDurationSeconds < 0)
 		{
 			errors.Add($"notifications.filter.min_duration_seconds={MinDurationSeconds} must be >= 0");
+		}
+	}
+}
+
+/// <summary>
+/// 地区解析（设计 §4.2 的 notifications.geoip 段 / §3.6）：enabled 开关 + 库文件列表（顺序 = 优先级，
+/// 相对路径以配置文件所在目录为基准）+ 地区名语言。库文件由用户自备（不随发布件分发）。
+/// </summary>
+internal sealed class GeoIpConfig
+{
+	/// <summary>地区解析开关；默认关（关闭时不查询、通知里整行不出现）。</summary>
+	[JsonPropertyName("enabled")]
+	public bool Enabled { get; set; }
+
+	/// <summary>库文件路径列表（顺序 = 优先级）；相对路径以配置文件所在目录为基准（R5.5）。</summary>
+	[JsonPropertyName("databases")]
+	public string[] Databases { get; set; } = [];
+
+	/// <summary>地区名语言（默认 zh）；库缺该语言时回退英文（R5.6）。</summary>
+	[JsonPropertyName("language")]
+	public string Language { get; set; } = "zh";
+
+	/// <summary>JSON null 兜底（源生成直接赋值，可能把声明为非空的属性置 null）。</summary>
+	public void Normalize()
+	{
+		Databases ??= [];
+		Language = (Language ?? "zh").Trim();
+	}
+
+	/// <summary>校验矩阵（设计 §4.2）：库列表里的空路径是配置笔误——报错退出优于静默跳过。</summary>
+	public void Validate(List<string> errors)
+	{
+		if (Databases.Any(string.IsNullOrWhiteSpace))
+		{
+			errors.Add("notifications.geoip.databases contains an empty path");
 		}
 	}
 }

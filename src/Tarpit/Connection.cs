@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using SSHTarpitWatch.Config;
+using SSHTarpitWatch.Geo;
 using SSHTarpitWatch.Infra;
 using SSHTarpitWatch.Notify;
 
@@ -18,20 +19,23 @@ internal sealed class Connection
 	private readonly Socket socket;
 	private readonly ConfigStore configStore;
 	private readonly NotifyPipeline notify;
+	private readonly GeoLookup geoLookup;
 	private readonly CancellationTokenSource closeCts = new();
 	private readonly long acceptedTicks;
 	private long bytesSent;
 	private string banner = "";
+	private GeoLookupResult geo;
 	private Task connectNotifyTask = Task.CompletedTask;
 
 	/// <summary>连接期快照（设计 §3.1/§3.4）：banner/本地端口/连接时刻/当日 N 随连接保留到断开，随连接对象释放而回收。</summary>
 	private ConnectionSnapshot? connectSnapshot;
 
-	public Connection(Socket socket, ConfigStore configStore, NotifyPipeline notify)
+	public Connection(Socket socket, ConfigStore configStore, NotifyPipeline notify, GeoLookup geoLookup)
 	{
 		this.socket = socket;
 		this.configStore = configStore;
 		this.notify = notify;
+		this.geoLookup = geoLookup;
 		acceptedTicks = Stopwatch.GetTimestamp();
 		(Host, RemotePort, LocalPort) = DescribeEndpoints(socket);
 	}
@@ -104,16 +108,37 @@ internal sealed class Connection
 		}
 	}
 
-	/// <summary>
-	/// 设计 §2 步 5：首行读取结束/超时后触发连接通知；取回身份串，并保留连接期快照
-	/// （banner/本地端口/连接时刻/当日 N/过闸标记）供断开时的合并断开条使用（设计 §3.1）。
-	/// </summary>
+	/// <summary>设计 §2 步 5：首行读取结束/超时后触发连接通知；地区查询与读 banner 同时机启动（设计 §3.6），
+	/// 结果连同快照保留到断开（banner/本地端口/连接时刻/当日 N/过闸标记/地区结果，设计 §3.1）。</summary>
 	private async Task FireConnectNotifyAsync(Task<string> bannerTask)
 	{
+		ValueTask<GeoLookupResult> geoTask;
+		try
+		{
+			// 门面同步抛错（调度失败等）不能作废整个连接通知任务：banner 采集与入队照常进行（评审 B2-F3）
+			geoTask = geoLookup.LookupAsync(Host);
+		}
+		catch (Exception ex)
+		{
+			Log.Debug($"GEO lookup host={Host} failed: {ex.GetType().Name}");
+			geoTask = ValueTask.FromResult(GeoLookupResult.NoRecord);
+		}
+
 		banner = await CaptureBannerAsync(bannerTask).ConfigureAwait(false);
 		try
 		{
-			connectSnapshot = notify.EnqueueConnect(Host, RemotePort, LocalPort, banner).Snapshot;
+			geo = await geoTask.ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			// 查库异常就地消化（GeoLookup 内部已兜底，这里再兜一层）：不阻塞慢滴、不影响困住逻辑
+			Log.Debug($"GEO lookup host={Host} failed: {ex.GetType().Name}");
+			geo = GeoLookupResult.NoRecord;
+		}
+
+		try
+		{
+			connectSnapshot = notify.EnqueueConnect(Host, RemotePort, LocalPort, banner, geo).Snapshot;
 		}
 		catch (Exception ex)
 		{
@@ -255,7 +280,7 @@ internal sealed class Connection
 	/// 连接通知入队异常（N4 兜底路径）时用本地已知信息兜底，保证断开条不因通知链路故障而丢失。
 	/// </summary>
 	private ConnectionSnapshot CloseSnapshot() => connectSnapshot
-		?? new ConnectionSnapshot(Host, RemotePort, LocalPort, banner, DateTimeOffset.UtcNow, 0, GatePassed: false);
+		?? new ConnectionSnapshot(Host, RemotePort, LocalPort, banner, DateTimeOffset.UtcNow, 0, GatePassed: false, geo);
 
 	private static (string Host, int RemotePort, int LocalPort) DescribeEndpoints(Socket socket)
 	{

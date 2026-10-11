@@ -1,5 +1,6 @@
 using System.Globalization;
 using SSHTarpitWatch.Config;
+using SSHTarpitWatch.Geo;
 using SSHTarpitWatch.Infra;
 using SSHTarpitWatch.Notify;
 using SSHTarpitWatch.Tarpit;
@@ -98,12 +99,19 @@ internal static class Program
 			Log.Info($"CONFIG warning=\"{warning}\"");
 		}
 
-		Log.Info($"CONFIG {Describe(store.Current)}");
+		// 地区库装配：库文件状态是运行期信息——警告在这里生成（设计 §4.1 / §3.6），不塞进 ConfigLoader
+		using GeoLookup geoLookup = new(store, ConfigDirectory(configPath));
+		foreach (string path in geoLookup.Open())
+		{
+			Log.Info($"CONFIG warning=\"geoip database not readable: {path}\"");
+		}
+
+		Log.Info($"CONFIG {Describe(store.Current)} geoip_open={geoLookup.OpenCount}");
 
 		using SignalWatcher signals = new();
 		using TelegramNotifier notifier = new();
 		NotifyPipeline pipeline = new(store, notifier);
-		TarpitServer server = new(store, pipeline);
+		TarpitServer server = new(store, pipeline, geoLookup);
 		try
 		{
 			server.Start();
@@ -124,7 +132,7 @@ internal static class Program
 			if (signals.ReloadRequested)
 			{
 				signals.AcknowledgeReload();
-				await ReloadAsync(configPath, store, server).ConfigureAwait(false);
+				await ReloadAsync(configPath, store, server, geoLookup).ConfigureAwait(false);
 			}
 
 			await Task.Delay(pollIntervalMs).ConfigureAwait(false);
@@ -138,7 +146,7 @@ internal static class Program
 	}
 
 	/// <summary>SIGHUP 热重载（设计 §4.3）：失败保留旧配置、进程不退出；成功打印新配置。</summary>
-	private static async Task ReloadAsync(string configPath, ConfigStore store, TarpitServer server)
+	private static async Task ReloadAsync(string configPath, ConfigStore store, TarpitServer server, GeoLookup geoLookup)
 	{
 		ConfigLoadResult load = ConfigLoader.Load(configPath);
 		if (load.Errors.Count > 0)
@@ -163,8 +171,10 @@ internal static class Program
 			Log.Info($"CONFIG warning=\"{warning}\"");
 		}
 
+		// 地区库：比对 mtime 重开（失败保留旧读取器 + ERROR，不退出）+ 清缓存（换库 / 换语言生效）
+		geoLookup.Reload();
 		await server.ApplyReloadAsync(load.Config).ConfigureAwait(false);
-		Log.Info($"RELOAD ok {Describe(load.Config)}");
+		Log.Info($"RELOAD ok {Describe(load.Config)} geoip_open={geoLookup.OpenCount}");
 	}
 
 	private static void ReportConfigErrors(IReadOnlyList<string> errors)
@@ -174,6 +184,10 @@ internal static class Program
 			Console.Error.WriteLine($"sshtarpitwatch: config error: {error}");
 		}
 	}
+
+	/// <summary>配置文件所在目录：databases 相对路径的基准（设计 §3.6 / R5.5；--config 与默认路径都适用）。</summary>
+	private static string ConfigDirectory(string configPath) =>
+		Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? Directory.GetCurrentDirectory();
 
 	/// <summary>配置摘要（不含 bot_token，设计 §9；键名与 §4.2 的配置结构一致）。</summary>
 	private static string Describe(AppConfig config) => string.Create(
@@ -187,5 +201,8 @@ internal static class Program
 		+ $"filter.on_close={config.Notifications.Filter.OnClose} "
 		+ $"filter.min_duration_seconds={config.Notifications.Filter.MinDurationSeconds} "
 		+ $"throttle.per_ip_seconds={config.Notifications.Throttle.PerIpSeconds} "
-		+ $"throttle.max_per_minute={config.Notifications.Throttle.MaxPerMinute}");
+		+ $"throttle.max_per_minute={config.Notifications.Throttle.MaxPerMinute} "
+		+ $"geoip_enabled={config.Notifications.Geoip.Enabled} "
+		+ $"geoip_databases={config.Notifications.Geoip.Databases.Length} "
+		+ $"geoip_language=\"{config.Notifications.Geoip.Language}\"");
 }

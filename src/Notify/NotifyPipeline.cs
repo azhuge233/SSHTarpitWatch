@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using SSHTarpitWatch.Config;
+using SSHTarpitWatch.Geo;
 using SSHTarpitWatch.Infra;
 
 namespace SSHTarpitWatch.Notify;
@@ -57,9 +58,11 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 	/// <summary>
 	/// 连接事件入队（设计 §2 步 5：首行读取结束/超时后触发）。
 	/// 步 1（当日计数）始终执行——被开关压制或去重丢弃的连接同样计入 N。
-	/// 返回的连接期快照（banner / 本地端口 / 连接时刻 / 当日 N / 过闸标记）由调用方随连接保留到断开（设计 §3.1/§3.4）。
+	/// 返回的连接期快照（banner / 本地端口 / 连接时刻 / 当日 N / 过闸标记 / 地区结果）由调用方随连接保留到断开（设计 §3.1/§3.4）。
 	/// </summary>
-	public ConnectEnqueueResult EnqueueConnect(string host, int port, int localPort, string banner)
+	/// <param name="geo">连接时异步查库的地区结果（设计 §3.6）；缺省 = 未启用——不渲染地区行。</param>
+	public ConnectEnqueueResult EnqueueConnect(
+		string host, int port, int localPort, string banner, GeoLookupResult geo = default)
 	{
 		int todayCount = ledger.RegisterConnect(host, timeProvider.GetLocalNow());
 		DateTimeOffset nowUtc = timeProvider.GetUtcNow();
@@ -73,9 +76,10 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 			TimeUtc = nowUtc,
 			ConnectTimeUtc = nowUtc,
 			TodayCount = todayCount,
+			Geo = geo,
 		};
 		NotifyEnqueueResult result = Process(evt, configStore.Current.Notifications);
-		ConnectionSnapshot snapshot = new(host, port, localPort, banner, nowUtc, todayCount, result.GatePassed);
+		ConnectionSnapshot snapshot = new(host, port, localPort, banner, nowUtc, todayCount, result.GatePassed, geo);
 		return new ConnectEnqueueResult(result, snapshot);
 	}
 
@@ -98,6 +102,7 @@ internal sealed class NotifyPipeline : IAsyncDisposable
 			ConnectGatePassed = snapshot.GatePassed,
 			DurationSeconds = durationSeconds,
 			BytesSent = bytesSent,
+			Geo = snapshot.Geo,
 		};
 		return Process(evt, configStore.Current.Notifications);
 	}

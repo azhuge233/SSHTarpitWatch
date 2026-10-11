@@ -72,6 +72,12 @@ internal static class ConfigLoader
 			warnings.Add("notifications inert: both filter.on_connect and filter.on_close are false");
 		}
 
+		if (errors.Count == 0 && config.Notifications.Geoip.Enabled && config.Notifications.Geoip.Databases.Length == 0)
+		{
+			// 开了地区解析却没配库（每个 IP 都会命中 DbMissing → 通知里持续显示「库缺失」）——提示而不报错
+			warnings.Add("geoip enabled but no databases configured (notifications will show the missing-database placeholder)");
+		}
+
 		return new ConfigLoadResult(config, errors, warnings);
 	}
 

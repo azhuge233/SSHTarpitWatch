@@ -10,6 +10,7 @@
   },
   "notifications": {
     "telegram": {
+      // 填好下面两行凭据再启动：enabled=true 且凭据为空会以退出码 1 拒绝启动（避免“静默不通知”）
       "enabled": true,
       "bot_token": "",
       "chat_id": ""
@@ -22,6 +23,12 @@
     "throttle": {
       "per_ip_seconds": 300,
       "max_per_minute": 3
+    },
+    "geoip": {
+      // 库文件放本文件同目录（相对路径以此为基准）；列表顺序即优先级；详见 manual/configuration.md
+      "enabled": false,
+      "databases": [],
+      "language": "zh"
     }
   }
 }

@@ -65,6 +65,7 @@ internal static class ConfigKeyValidator
 		Telegram,
 		Filter,
 		Throttle,
+		Geoip,
 	}
 
 	/// <summary>各层级的允许键集合（设计 §4.2 字段表）。</summary>
@@ -72,10 +73,12 @@ internal static class ConfigKeyValidator
 	{
 		[KeyScope.Root] = ["nickname", "log_level", "server", "notifications"],
 		[KeyScope.Server] = ["port", "bind_family", "delay_ms", "line_length", "max_clients"],
-		[KeyScope.Notifications] = ["telegram", "filter", "throttle"],
+		[KeyScope.Notifications] = ["telegram", "filter", "throttle", "geoip"],
 		[KeyScope.Telegram] = ["enabled", "bot_token", "chat_id"],
 		[KeyScope.Filter] = ["on_connect", "on_close", "min_duration_seconds"],
 		[KeyScope.Throttle] = ["per_ip_seconds", "max_per_minute"],
+		// databases 是数组：Walk 只在值为 Object 时递归，数组天然不参与递归（无需特殊处理）
+		[KeyScope.Geoip] = ["enabled", "databases", "language"],
 	};
 
 	/// <summary>旧键 → 新键（设计 §4.2 迁移表）；旧键出现即报错退出。</summary>
@@ -100,6 +103,7 @@ internal static class ConfigKeyValidator
 		(KeyScope.Notifications, "telegram") => KeyScope.Telegram,
 		(KeyScope.Notifications, "filter") => KeyScope.Filter,
 		(KeyScope.Notifications, "throttle") => KeyScope.Throttle,
+		(KeyScope.Notifications, "geoip") => KeyScope.Geoip,
 		_ => null,
 	};
 }

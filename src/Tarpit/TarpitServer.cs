@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using SSHTarpitWatch.Config;
+using SSHTarpitWatch.Geo;
 using SSHTarpitWatch.Infra;
 using SSHTarpitWatch.Notify;
 
@@ -18,6 +19,7 @@ internal sealed class TarpitServer
 
 	private readonly ConfigStore configStore;
 	private readonly NotifyPipeline notify;
+	private readonly GeoLookup geoLookup;
 	private readonly CapacityGate gate;
 	private readonly ConcurrentDictionary<long, Connection> connections = new();
 	private readonly CancellationTokenSource stopCts = new();
@@ -28,10 +30,11 @@ internal sealed class TarpitServer
 	private int boundPort;
 	private BindFamilyMode boundFamily;
 
-	public TarpitServer(ConfigStore configStore, NotifyPipeline notify)
+	public TarpitServer(ConfigStore configStore, NotifyPipeline notify, GeoLookup geoLookup)
 	{
 		this.configStore = configStore;
 		this.notify = notify;
+		this.geoLookup = geoLookup;
 		gate = new CapacityGate(configStore.Current.Server.MaxClients);
 	}
 
@@ -185,7 +188,7 @@ internal sealed class TarpitServer
 
 	private void HandleAccepted(Socket client)
 	{
-		Connection connection = new(client, configStore, notify);
+		Connection connection = new(client, configStore, notify, geoLookup);
 		long id = Interlocked.Increment(ref nextConnectionId);
 		connections[id] = connection;
 		Stats.CountConnect();
