@@ -72,4 +72,4 @@ The SSH protocol requires clients to send their identification string (e.g. `SSH
 
 - Mechanism modeled after **[skeeto/endlessh](https://github.com/skeeto/endlessh)** (public domain). This project is an **independent implementation** in C# and contains none of its code.
 - Inspired by **[shizunge/endlessh-go](https://github.com/shizunge/endlessh-go)**, a modern Go implementation of endlessh.
-- IP geolocation resolution follows the approach of **[zu1k/nali](https://github.com/zu1k/nali)** (an offline IP query tool). Lookup data comes from an offline database you provide — e.g. [DB-IP Lite](https://db-ip.com/db/lite/) (CC BY 4.0), [IPinfo Lite](https://ipinfo.io/lite) (CC BY-SA 4.0) or [ip2region](https://github.com/lionsoul2014/ip2region) (Apache-2.0); keep the attribution each license asks for.
+- IP geolocation resolution follows the approach of **[zu1k/nali](https://github.com/zu1k/nali)** (an offline IP query tool).

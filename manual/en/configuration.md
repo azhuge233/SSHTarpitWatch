@@ -4,7 +4,11 @@
 
 By default the program reads the `config.json` **next to the binary** (regardless of the directory you start it from; when invoked through a symlink, the real binary's directory is used), or use `--config <path>` for another location. If the file is missing it runs with defaults (notifications disabled) and prints a warning (including the path it looked at); on a configuration error it prints the specific errors and exits with code 1.
 
-JSON comments and trailing commas are allowed; missing keys fall back to their defaults. **Misspelled keys, or keys from an older layout, are never silently ignored** — startup fails with a per-key message telling you what to rename (see "Migrating an older config" below).
+JSON comments and trailing commas are allowed; missing keys fall back to their defaults. **Misspelled keys are never silently ignored** — startup fails and names the offending key.
+
+`config.json` holds your Telegram bot token (think of it as the bot's password): `chmod 600 config.json` is recommended so that only the user running the program can read it. A leaked token lets anyone send messages to your chat as this bot.
+
+To make a running instance pick up changes, see [Command line & signals](cli.md) (`SIGHUP` hot-reloads the config).
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -57,28 +61,5 @@ ISP：电信
 - **The language of names depends on which database answers first**: to get 中国 rather than China, list ip2region before the MMDB.
 - **Swapping a database**: replace the file and send `SIGHUP` — the program reopens it when the file's modification time changes.
 - **Degradation**: `enabled=true` with an unreadable database → a startup warning plus `地区：库缺失`; a readable database with no record for the address → `地区：无查询结果`; `enabled=false` → the region line never appears.
-- Data-source licenses are listed under [Credits](../../README.md#credits) — keep the attribution each of them asks for.
+- These offline databases come with their own licence and attribution terms (stated on their download pages) — check and follow them before enabling; this project distributes none of them.
 
-## Migrating an older config
-
-The config layout has been reorganised: related keys now live under the `server`, `notifications.filter` and `notifications.throttle` sections. **Old key names make startup fail** (never a silent no-op), with a per-key message naming the new key — the messages themselves are currently in Chinese:
-
-```
-port 已改为 server.port，请更新配置
-notifications.dedup_per_ip_seconds 已改为 notifications.throttle.per_ip_seconds，请更新配置
-```
-
-Mapping table:
-
-| Old key | New key |
-|---|---|
-| `port` / `bind_family` / `delay_ms` / `line_length` / `max_clients` | add the `server.` prefix (same names) |
-| `notifications.notify_on_connect` / `notify_on_close` | `notifications.filter.on_connect` / `notifications.filter.on_close` |
-| `notifications.dedup_per_ip_seconds` | `notifications.throttle.per_ip_seconds` |
-| `notifications.max_per_minute` | `notifications.throttle.max_per_minute` |
-
-> One behaviour change comes with it: by default you now get **one notification per connection, sent when it disconnects** (with the connect-time information merged in); there is no separate "new connection" message unless you set `notifications.filter.on_connect` to `true`. See [Notifications](notifications.md).
-
-> `config.json` holds your Telegram bot token (think of it as the bot's password): `chmod 600 config.json` is recommended so that only the user running the program can read it. A leaked token lets anyone send messages to your chat as this bot.
-
-To make a running instance pick up changes, see [Command line & signals](cli.md) (`SIGHUP` hot-reloads the config).

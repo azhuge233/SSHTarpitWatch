@@ -72,4 +72,4 @@ SSH 协议要求客户端在连接建立后立刻发送自己的身份串（如 
 
 - 机制对标 **[skeeto/endlessh](https://github.com/skeeto/endlessh)**（SSH 焦油坑的经典实现，公有领域）——本项目为**独立实现**（C#），不包含其代码。
 - 灵感亦来自 **[shizunge/endlessh-go](https://github.com/shizunge/endlessh-go)**（endlessh 的现代 Go 实现）。
-- IP 地区解析的**实现思路参考** **[zu1k/nali](https://github.com/zu1k/nali)**（离线 IP 查询工具）；查询数据来自你自己准备的离线库——如 [DB-IP Lite](https://db-ip.com/db/lite/)（CC BY 4.0）、[IPinfo Lite](https://ipinfo.io/lite)（CC BY-SA 4.0）、[ip2region](https://github.com/lionsoul2014/ip2region)（Apache-2.0）——请按各自许可保留署名。
+- IP 地区解析的**实现思路参考** **[zu1k/nali](https://github.com/zu1k/nali)**（离线 IP 查询工具）。

@@ -4,7 +4,11 @@
 
 程序默认读取**二进制所在目录**的 `config.json`（与你在哪个目录启动无关；经符号链接调用时按真实二进制所在目录算），也可以用 `--config <路径>` 指定其他位置。文件不存在时按默认值运行（通知关闭）并打印警告（含它查找的路径）；配置有错时打印具体错误并以退出码 1 退出。
 
-JSON 允许注释与尾逗号；缺省的键使用默认值。**键名拼错、或使用旧版键名不会被静默忽略**——启动时直接报错并逐条提示该改成什么（见下面「旧版配置迁移」）。
+JSON 允许注释与尾逗号；缺省的键使用默认值。**键名拼错不会被静默忽略**——启动时直接报错并点名该键。
+
+`config.json` 里是 Telegram Bot Token（相当于这个 bot 的密码）：建议 `chmod 600 config.json`，只有运行它的用户可读。token 一旦泄露，任何人都能以这个 bot 的名义往你的会话发消息。
+
+改完配置让运行中的实例生效：见[命令行与信号](cli.md)（`SIGHUP` 热重载）。
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
@@ -57,28 +61,5 @@ ISP：电信
 - **国家名的语言**取决于哪个库先给出：想让中国 IP 显示「中国」（而不是 China），把 ip2region 排在 MMDB 之前。
 - **换库生效**：替换文件后 `SIGHUP` 重载即可（程序按文件 mtime 自动重开）。
 - **降级表现**：`enabled=true` 但库文件读不到 → 启动打印警告，通知显示 `地区：库缺失`；库正常但该 IP 无记录 → `地区：无查询结果`；`enabled=false` → 通知里不出现地区行。
-- 数据来源的许可见 [Credits](../README.md#credits)（按各自许可保留署名）。
+- 这些离线库各有自己的许可与署名要求（下载页会写明）——启用前请到各自官网确认并遵守；本项目不分发任何库文件。
 
-## 旧版配置迁移
-
-配置结构已重排：相关键收进 `server` / `notifications.filter` / `notifications.throttle` 三个段。**旧键名会直接报错**（不会静默失效），报错信息逐条给出新键名，例如：
-
-```
-port 已改为 server.port，请更新配置
-notifications.dedup_per_ip_seconds 已改为 notifications.throttle.per_ip_seconds，请更新配置
-```
-
-对照表：
-
-| 旧键 | 新键 |
-|---|---|
-| `port` / `bind_family` / `delay_ms` / `line_length` / `max_clients` | 加 `server.` 前缀（键名不变） |
-| `notifications.notify_on_connect` / `notify_on_close` | `notifications.filter.on_connect` / `notifications.filter.on_close` |
-| `notifications.dedup_per_ip_seconds` | `notifications.throttle.per_ip_seconds` |
-| `notifications.max_per_minute` | `notifications.throttle.max_per_minute` |
-
-> 同时还有一处默认行为变化：现在默认**只在连接断开时发一条通知**（合并了连接期的信息），不再单独发"新连接"消息；想要两条的话把 `notifications.filter.on_connect` 设为 `true`。详见[通知](notifications.md)。
-
-> `config.json` 里是 Telegram Bot Token（相当于这个 bot 的密码）：建议 `chmod 600 config.json`，只有运行它的用户可读。token 一旦泄露，任何人都能以这个 bot 的名义往你的会话发消息。
-
-改完配置让运行中的实例生效：见[命令行与信号](cli.md)（`SIGHUP` 热重载）。
