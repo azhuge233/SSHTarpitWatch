@@ -7,20 +7,25 @@
 #   docker compose logs -f        # 看日志（Ctrl+C 退出）
 #   docker compose down           # 停止并删除容器
 #
-# 需要按你的环境改的只有两处：user（改成 `id -u`:`id -g` 的输出）与 ports。
+# 端口在配置文件的 server.port 里改（示例默认 2222；想顶在宿主 22 端口就写 22）——
+# 本文件使用 host 网络，端口不再由 compose 指定，宿主上不能有别的程序占用同一个端口。
+# 用 host 网络是为了留住真实来源 IP：bridge 网络下 Docker 的端口转发会把来源改写成
+# 网桥网关（例如 172.20.0.1），通知里的来源、地区解析、ISP 标签与按 IP 去重都会失真。
 
 services:
   sshtarpitwatch:
-    image: azhuge233/sshtarpitwatch:latest   # 也可以固定到某个版本，例如 :0.2.0
+    image: azhuge233/sshtarpitwatch:latest   # 也可以固定到某个版本，例如 :0.3.1
     container_name: sshtarpitwatch
     restart: unless-stopped
 
-    # 以你自己的身份运行：这样 chmod 600 的 config.json 依然读得到
-    user: "1000:1000"
+    # 共享宿主网络栈：容器直接看到真实客户端地址（v4 与 v6 都在内），无需端口转发
+    network_mode: host
 
-    ports:
-      # 想让焦油坑顶在宿主的 22 端口（真实 SSH 另挪他处）：把左边改成 22
-      - "2222:2222"
+    # 监听 <1024 端口（如 22）是内核硬要求：非 root 进程即使加了能力也无效（实测 Permission denied）。
+    # 这里以 root 运行并只放回 NET_BIND_SERVICE 一项能力；其余最小权限设置保持不变。
+    user: "0:0"
+    cap_add:
+      - NET_BIND_SERVICE
 
     volumes:
       # 挂载"目录"而不是单个文件——编辑器保存会替换文件，单文件挂载下热重载会读到旧内容
@@ -28,7 +33,7 @@ services:
       # 镜像内不含时区数据：挂上宿主时区，通知里的时间才与宿主机一致
       - /etc/localtime:/etc/localtime:ro
 
-    # 以下四项 = 最小权限运行：只读根文件系统、丢弃全部能力、禁止提权、限制内存与进程数
+    # 以下各项 = 最小权限运行：只读根文件系统、丢弃全部能力、禁止提权、限制内存与进程数
     read_only: true
     tmpfs:
       - /tmp
