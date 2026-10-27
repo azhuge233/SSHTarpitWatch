@@ -17,6 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 钉住 SDK 补丁带：NativeAOT 会把运行时编进二进制，安全补丁只有用新 SDK 重编才生效；
+      # 不钉的话用哪一版取决于 runner 镜像自带，补丁可能悄悄漏掉
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
       - name: 缓存 NuGet 包
         uses: actions/cache@v6
         with:
@@ -39,6 +46,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      # 钉住 SDK 补丁带：NativeAOT 会把运行时编进二进制，安全补丁只有用新 SDK 重编才生效；
+      # 不钉的话用哪一版取决于 runner 镜像自带，补丁可能悄悄漏掉
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
 
       - name: 缓存 NuGet 包
         uses: actions/cache@v6
